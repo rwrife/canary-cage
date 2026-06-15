@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Tooling
+.uv/
+uv.lock
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Canary runtime state (project-local; users may want to gitignore in their own repos)
+.canary-cage/fired/
+.canary-cage/beacon.log
