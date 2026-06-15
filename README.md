@@ -8,13 +8,36 @@
 
 Agentjacking — where attackers poison content your AI coding agent reads (READMEs, issues, deps) to trick it into running their code — is now a real, named class of attack ([The Hacker News, June 2026](https://thehackernews.com/2026/06/agentjacking-attack-tricks-ai-coding.html)). `canary-cage` lets you proactively place tripwires in your own repo so you find out *the instant* something bites.
 
-## Quickstart (coming in M1)
+## Quickstart
+
+M1 ships the CLI skeleton — `plant`/`list`/`check`/`uproot` are stubbed and land in later milestones.
+
+```bash
+# from a checkout (PyPI release comes with M6)
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+
+canary --version
+canary hello
+canary --help
+```
+
+Coming soon:
 
 ```bash
 pipx install canary-cage
 canary plant
 # ... let your agent loose ...
 canary check
+```
+
+## Development
+
+```bash
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+ruff check .
+pytest
 ```
 
 ## Concepts
