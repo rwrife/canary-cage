@@ -35,6 +35,6 @@ def test_help_lists_planned_commands() -> None:
         assert cmd in result.stdout
 
 
-def test_plant_placeholder_exits_nonzero() -> None:
-    result = runner.invoke(app, ["plant"])
+def test_list_placeholder_exits_nonzero() -> None:
+    result = runner.invoke(app, ["list"])
     assert result.exit_code == 2
