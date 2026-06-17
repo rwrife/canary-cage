@@ -35,6 +35,7 @@ def test_help_lists_planned_commands() -> None:
         assert cmd in result.stdout
 
 
-def test_list_placeholder_exits_nonzero() -> None:
-    result = runner.invoke(app, ["list"])
-    assert result.exit_code == 2
+def test_list_empty_repo(tmp_path) -> None:
+    result = runner.invoke(app, ["list", "--root", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "no canaries planted" in result.stdout

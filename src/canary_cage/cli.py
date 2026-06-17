@@ -6,9 +6,10 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from . import __version__
-from .canaries import MarkdownCanary
+from .canaries import DocstringCanary, MarkdownCanary, TodoCanary
 from .state import CageState, load_state, save_state, state_path
 
 app = typer.Typer(
@@ -22,7 +23,11 @@ console = Console()
 
 _CANARY_REGISTRY = {
     "markdown": MarkdownCanary,
+    "docstring": DocstringCanary,
+    "todo": TodoCanary,
 }
+
+_ALL_TYPES = tuple(_CANARY_REGISTRY)
 
 
 def _version_callback(value: bool) -> None:
@@ -52,10 +57,10 @@ def hello(name: str = typer.Argument("world", help="Who to greet.")) -> None:
 
 
 _TYPE_OPTION = typer.Option(
-    "markdown",
+    "all",
     "--type",
     "-t",
-    help="Canary type to plant. M2 ships with: markdown.",
+    help="Canary type to plant: markdown, docstring, todo, or 'all'.",
 )
 _ROOT_OPTION = typer.Option(
     None,
@@ -79,14 +84,20 @@ def plant(
     """Plant canaries across the repo and record them in state."""
 
     root = _resolve_root(root)
-    canary_cls = _CANARY_REGISTRY.get(type)
-    if canary_cls is None:
-        known = ", ".join(sorted(_CANARY_REGISTRY))
+    if type == "all":
+        types = _ALL_TYPES
+    elif type in _CANARY_REGISTRY:
+        types = (type,)
+    else:
+        known = ", ".join((*sorted(_CANARY_REGISTRY), "all"))
         console.print(f"[red]unknown canary type: {type!r} (known: {known})[/red]")
         raise typer.Exit(code=2)
 
     state = load_state(root)
-    newly_planted = canary_cls().plant(root)
+    newly_planted = []
+    for t in types:
+        newly_planted.extend(_CANARY_REGISTRY[t]().plant(root))
+
     if not newly_planted:
         console.print("[yellow]no eligible files found to plant in.[/yellow]")
         # Still write state to materialize the cage dir on first run.
@@ -96,16 +107,36 @@ def plant(
     state.canaries.extend(newly_planted)
     save_state(root, state)
     console.print(
-        f"🐤 planted [bold]{len(newly_planted)}[/bold] {type} canar"
+        f"🐤 planted [bold]{len(newly_planted)}[/bold] canar"
         f"{'y' if len(newly_planted) == 1 else 'ies'} → {state_path(root)}"
     )
 
 
 @app.command("list")
-def list_() -> None:
-    """List planted canaries. (not implemented yet — M3)"""
-    console.print("[yellow]list: not implemented yet — see PLAN.md M3.[/yellow]")
-    raise typer.Exit(code=2)
+def list_(
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """List every planted canary in a Rich table."""
+
+    root = _resolve_root(root)
+    state = load_state(root)
+    if not state.canaries:
+        console.print("[yellow]no canaries planted — run `canary plant`.[/yellow]")
+        return
+
+    table = Table(title=f"🐤 canary-cage ({len(state.canaries)} planted)")
+    table.add_column("id", style="cyan", no_wrap=True)
+    table.add_column("type", style="magenta")
+    table.add_column("path", style="green")
+    table.add_column("planted_at", style="dim")
+    for c in sorted(state.canaries, key=lambda x: (x.type, x.path)):
+        table.add_row(
+            c.id,
+            c.type,
+            c.path,
+            c.planted_at.strftime("%Y-%m-%d %H:%M:%SZ"),
+        )
+    console.print(table)
 
 
 @app.command()
