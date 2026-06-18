@@ -18,7 +18,7 @@ STATE_DIR_NAME = ".canary-cage"
 STATE_FILE_NAME = "state.json"
 SCHEMA_VERSION = 1
 
-CanaryType = Literal["markdown"]
+CanaryType = Literal["markdown", "docstring", "todo"]
 
 
 class PlantedCanary(BaseModel):

@@ -26,10 +26,15 @@ Coming soon:
 
 ```bash
 pipx install canary-cage
-canary plant
+canary plant            # plant all three canary types
+canary list             # see what's in the cage
 # ... let your agent loose ...
 canary check
+canary uproot           # restore the repo cleanly
 ```
+
+As of **M3**, `plant`, `list`, and `uproot` are real. `--type` accepts
+`markdown`, `docstring`, `todo`, or `all` (the default).
 
 ## Development
 
