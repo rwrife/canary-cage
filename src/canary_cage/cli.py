@@ -10,6 +10,7 @@ from rich.table import Table
 
 from . import __version__
 from .canaries import DocstringCanary, MarkdownCanary, TodoCanary
+from .scanner import scan
 from .state import CageState, load_state, save_state, state_path
 
 app = typer.Typer(
@@ -140,10 +141,26 @@ def list_(
 
 
 @app.command()
-def check() -> None:
-    """Scan for evidence a canary fired. (not implemented yet — M4)"""
-    console.print("[yellow]check: not implemented yet — see PLAN.md M4.[/yellow]")
-    raise typer.Exit(code=2)
+def check(
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Scan for evidence a canary fired and fire beacons for each hit."""
+
+    root = _resolve_root(root)
+    fires = scan(root)
+    if not fires:
+        console.print("🐤 [green]all canaries singing — no fires detected.[/green]")
+        return
+
+    table = Table(title=f"🚨 {len(fires)} canary fire(s) detected")
+    table.add_column("canary_id", style="cyan", no_wrap=True)
+    table.add_column("type", style="magenta")
+    table.add_column("source", style="yellow")
+    table.add_column("detail", style="red")
+    for rec in fires:
+        table.add_row(rec.canary_id, rec.canary_type, rec.source, rec.detail)
+    console.print(table)
+    raise typer.Exit(code=1)
 
 
 @app.command()
