@@ -33,8 +33,15 @@ canary check
 canary uproot           # restore the repo cleanly
 ```
 
-As of **M3**, `plant`, `list`, and `uproot` are real. `--type` accepts
+As of **M4**, `plant`, `list`, `check`, and `uproot` are real. `--type` accepts
 `markdown`, `docstring`, `todo`, or `all` (the default).
+
+`canary check` scans the working tree for missing canary sentinels, looks
+for stray fire artifacts in `.canary-cage/fired/`, and greps git history
+for canary markers. Each detected fire is recorded by the **file beacon**
+(`.canary-cage/fired/<id>.json`) and the **log beacon**
+(`.canary-cage/beacon.log`). The command exits non-zero when at least one
+fire is detected so it slots cleanly into CI.
 
 ## Development
 
