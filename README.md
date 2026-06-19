@@ -43,6 +43,30 @@ for canary markers. Each detected fire is recorded by the **file beacon**
 (`.canary-cage/beacon.log`). The command exits non-zero when at least one
 fire is detected so it slots cleanly into CI.
 
+### Configuration (M5)
+
+Drop a `canary.toml` at the repo root to tune which types get planted,
+which paths to skip, and how densely to seed the eligible set:
+
+```bash
+canary init                       # writes a commented default canary.toml
+canary init --preset paranoid     # …or seed it with a named preset
+```
+
+```toml
+[canary]
+# preset = "minimal"       # markdown-only, low density
+# preset = "chaotic-good"  # all types, ~half of eligible files
+# preset = "paranoid"      # all types, everywhere
+
+types = ["markdown", "docstring", "todo"]
+ignore = ["docs/**", "vendor/**"]
+density = 1.0   # 0.0–1.0
+```
+
+Explicit fields always win over preset defaults. `.canary-cage/**` and
+`.git/**` are always ignored.
+
 ## Development
 
 ```bash

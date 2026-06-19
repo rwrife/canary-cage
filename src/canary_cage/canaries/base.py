@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
+from ..config import PlantFilter
 from ..state import PlantedCanary
 
 
@@ -18,7 +19,9 @@ class Canary(Protocol):
 
     type_name: str
 
-    def plant(self, root: Path) -> list[PlantedCanary]:
+    def plant(
+        self, root: Path, plant_filter: PlantFilter | None = None
+    ) -> list[PlantedCanary]:
         """Plant canaries under ``root`` and return state records."""
 
     def uproot(self, root: Path, planted: PlantedCanary) -> None:

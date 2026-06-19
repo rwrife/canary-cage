@@ -14,6 +14,7 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
+from ..config import PlantFilter
 from ..state import PlantedCanary
 
 MARKER_PREFIX = "canary-cage:todo"
@@ -49,16 +50,23 @@ class TodoCanary:
 
     type_name = "todo"
 
-    def plant(self, root: Path) -> list[PlantedCanary]:
+    def plant(
+        self, root: Path, plant_filter: PlantFilter | None = None
+    ) -> list[PlantedCanary]:
         planted: list[PlantedCanary] = []
-        candidates = [
+        candidates_all = [
             p
             for ext in _EXTENSIONS
             for p in root.glob(f"**/*{ext}")
         ]
-        for src_path in sorted(set(candidates)):
-            if not src_path.is_file() or not _is_tracked(src_path, root):
-                continue
+        candidates = [
+            p
+            for p in sorted(set(candidates_all))
+            if p.is_file() and _is_tracked(p, root)
+        ]
+        if plant_filter is not None:
+            candidates = plant_filter.select(root, candidates)
+        for src_path in candidates:
             content = src_path.read_text(encoding="utf-8")
             if MARKER_PREFIX in content:
                 continue
