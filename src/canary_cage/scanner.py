@@ -22,8 +22,9 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from .beacons import Beacon, BeaconRecord, FileBeacon, LogBeacon
+from .beacons import Beacon, BeaconRecord, FileBeacon, LogBeacon, WebhookBeacon
 from .beacons.file import FIRED_DIR_NAME
+from .config import load_config
 from .state import STATE_DIR_NAME, PlantedCanary, load_state
 
 # Canary type → sentinel substring we expect to still be present in the
@@ -37,6 +38,26 @@ _SENTINELS = {
 
 def default_beacons() -> list[Beacon]:
     return [FileBeacon(), LogBeacon()]
+
+
+def beacons_for(root: Path) -> list[Beacon]:
+    """Default beacons plus any beacons enabled in ``canary.toml``."""
+    sinks: list[Beacon] = default_beacons()
+    try:
+        cfg = load_config(root)
+    except (ValueError, OSError):
+        return sinks
+    if cfg.webhook.url:
+        sinks.append(
+            WebhookBeacon(
+                url=cfg.webhook.url,
+                timeout=cfg.webhook.timeout,
+                max_attempts=cfg.webhook.max_attempts,
+                backoff=cfg.webhook.backoff,
+                headers=dict(cfg.webhook.headers),
+            )
+        )
+    return sinks
 
 
 def _check_working_tree(
@@ -161,7 +182,7 @@ def _check_git_history(
 
 def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconRecord]:
     """Run all signal checks and fire beacons for each detected event."""
-    sinks = list(beacons) if beacons is not None else default_beacons()
+    sinks = list(beacons) if beacons is not None else beacons_for(root)
     state = load_state(root)
     fires: list[BeaconRecord] = []
 

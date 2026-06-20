@@ -34,6 +34,35 @@ DEFAULT_IGNORE: tuple[str, ...] = (
 )
 
 
+class WebhookConfig(BaseModel):
+    """Optional webhook beacon configuration.
+
+    When ``url`` is set, ``canary check`` will POST every fire to that
+    URL in addition to the always-on file/log beacons. Missing / empty
+    config keeps the beacon disabled (the default for v0.1).
+    """
+
+    url: str | None = None
+    timeout: float = 5.0
+    max_attempts: int = 3
+    backoff: float = 0.5
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("timeout must be > 0")
+        return v
+
+    @field_validator("max_attempts")
+    @classmethod
+    def _attempts_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_attempts must be >= 1")
+        return v
+
+
 class CageConfig(BaseModel):
     """Top-level config document loaded from ``canary.toml``.
 
@@ -45,6 +74,7 @@ class CageConfig(BaseModel):
     types: list[CanaryType] = Field(default_factory=lambda: list(ALL_TYPES))
     ignore: list[str] = Field(default_factory=list)
     density: float = 1.0
+    webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
     @field_validator("density")
     @classmethod
@@ -103,6 +133,14 @@ def load_config(root: Path) -> CageConfig:
     section = data.get("canary", data)
     if not isinstance(section, dict):
         raise ValueError(f"{CONFIG_FILE_NAME}: [canary] section must be a table")
+    # Surface a top-level [beacons.webhook] table as canary.webhook so
+    # users can keep the beacon config visually separate from canary
+    # planting knobs in their TOML.
+    beacons = data.get("beacons")
+    if isinstance(beacons, dict):
+        wh = beacons.get("webhook")
+        if isinstance(wh, dict) and "webhook" not in section:
+            section = {**section, "webhook": wh}
     preset = section.get("preset")
     if preset is not None:
         if preset not in PRESETS:
@@ -139,6 +177,15 @@ ignore = [
 
 # Fraction of eligible files (per type) to actually plant in: 0.0–1.0.
 density = 1.0
+
+# Optional webhook beacon. When `url` is set, `canary check` POSTs every
+# detected fire as JSON to the URL (file + log beacons still run too).
+# [beacons.webhook]
+# url = "https://example.com/canary-fires"
+# timeout = 5.0
+# max_attempts = 3
+# backoff = 0.5
+# headers = { Authorization = "Bearer ${CANARY_WEBHOOK_TOKEN}" }
 """
 
 
