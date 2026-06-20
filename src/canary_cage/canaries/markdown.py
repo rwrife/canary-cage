@@ -11,6 +11,7 @@ from __future__ import annotations
 import secrets
 from pathlib import Path
 
+from ..config import PlantFilter
 from ..state import PlantedCanary
 
 MARKER_PREFIX = "canary-cage:md"
@@ -43,11 +44,18 @@ class MarkdownCanary:
 
     type_name = "markdown"
 
-    def plant(self, root: Path) -> list[PlantedCanary]:
+    def plant(
+        self, root: Path, plant_filter: PlantFilter | None = None
+    ) -> list[PlantedCanary]:
         planted: list[PlantedCanary] = []
-        for md_path in sorted(root.glob(DEFAULT_GLOB)):
-            if not md_path.is_file() or not _is_tracked(md_path, root):
-                continue
+        candidates = [
+            p
+            for p in sorted(root.glob(DEFAULT_GLOB))
+            if p.is_file() and _is_tracked(p, root)
+        ]
+        if plant_filter is not None:
+            candidates = plant_filter.select(root, candidates)
+        for md_path in candidates:
             marker = _new_marker()
             content = md_path.read_text(encoding="utf-8")
             if MARKER_PREFIX in content:

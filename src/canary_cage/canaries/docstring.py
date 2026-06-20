@@ -17,6 +17,7 @@ import ast
 import secrets
 from pathlib import Path
 
+from ..config import PlantFilter
 from ..state import PlantedCanary
 
 MARKER_PREFIX = "canary-cage:py"
@@ -113,11 +114,18 @@ class DocstringCanary:
 
     type_name = "docstring"
 
-    def plant(self, root: Path) -> list[PlantedCanary]:
+    def plant(
+        self, root: Path, plant_filter: PlantFilter | None = None
+    ) -> list[PlantedCanary]:
         planted: list[PlantedCanary] = []
-        for py_path in sorted(root.glob(DEFAULT_GLOB)):
-            if not py_path.is_file() or not _is_tracked(py_path, root):
-                continue
+        candidates = [
+            p
+            for p in sorted(root.glob(DEFAULT_GLOB))
+            if p.is_file() and _is_tracked(p, root)
+        ]
+        if plant_filter is not None:
+            candidates = plant_filter.select(root, candidates)
+        for py_path in candidates:
             source = py_path.read_text(encoding="utf-8")
             if MARKER_PREFIX in source:
                 continue

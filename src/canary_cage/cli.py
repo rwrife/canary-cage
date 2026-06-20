@@ -10,6 +10,14 @@ from rich.table import Table
 
 from . import __version__
 from .canaries import DocstringCanary, MarkdownCanary, TodoCanary
+from .config import (
+    CONFIG_FILE_NAME,
+    PRESETS,
+    PlantFilter,
+    config_path,
+    load_config,
+    write_default_config,
+)
 from .scanner import scan
 from .state import CageState, load_state, save_state, state_path
 
@@ -27,8 +35,6 @@ _CANARY_REGISTRY = {
     "docstring": DocstringCanary,
     "todo": TodoCanary,
 }
-
-_ALL_TYPES = tuple(_CANARY_REGISTRY)
 
 
 def _version_callback(value: bool) -> None:
@@ -78,6 +84,43 @@ def _resolve_root(root: Path | None) -> Path:
 
 
 @app.command()
+def init(
+    root: Path | None = _ROOT_OPTION,
+    preset: str | None = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help="Seed the config with a named preset (minimal, paranoid, chaotic-good).",
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite an existing canary.toml."
+    ),
+) -> None:
+    """Write a default ``canary.toml`` config to the repo root."""
+
+    root = _resolve_root(root)
+    if preset is not None and preset not in PRESETS:
+        known = ", ".join(sorted(PRESETS))
+        console.print(f"[red]unknown preset: {preset!r} (known: {known})[/red]")
+        raise typer.Exit(code=2)
+    try:
+        path = write_default_config(root, overwrite=force)
+    except FileExistsError:
+        console.print(
+            f"[yellow]{CONFIG_FILE_NAME} already exists at {config_path(root)} — "
+            "pass --force to overwrite.[/yellow]"
+        )
+        raise typer.Exit(code=1) from None
+    if preset is not None:
+        text = path.read_text(encoding="utf-8")
+        needle = f'# preset = "{preset}"'
+        if needle in text:
+            text = text.replace(needle, f'preset = "{preset}"', 1)
+            path.write_text(text, encoding="utf-8")
+    console.print(f"🐤 wrote {path}" + (f" (preset: {preset})" if preset else ""))
+
+
+@app.command()
 def plant(
     type: str = _TYPE_OPTION,
     root: Path | None = _ROOT_OPTION,
@@ -85,9 +128,21 @@ def plant(
     """Plant canaries across the repo and record them in state."""
 
     root = _resolve_root(root)
+    try:
+        config = load_config(root)
+    except (ValueError, OSError) as exc:
+        console.print(f"[red]bad {CONFIG_FILE_NAME}: {exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    plant_filter = PlantFilter(config)
+
     if type == "all":
-        types = _ALL_TYPES
+        types = tuple(config.types)
     elif type in _CANARY_REGISTRY:
+        if type not in config.types:
+            console.print(
+                f"[yellow]warning: {type!r} not in canary.toml [canary].types — "
+                "planting anyway because it was requested explicitly.[/yellow]"
+            )
         types = (type,)
     else:
         known = ", ".join((*sorted(_CANARY_REGISTRY), "all"))
@@ -97,7 +152,7 @@ def plant(
     state = load_state(root)
     newly_planted = []
     for t in types:
-        newly_planted.extend(_CANARY_REGISTRY[t]().plant(root))
+        newly_planted.extend(_CANARY_REGISTRY[t]().plant(root, plant_filter))
 
     if not newly_planted:
         console.print("[yellow]no eligible files found to plant in.[/yellow]")
@@ -195,3 +250,4 @@ def uproot(
 
 if __name__ == "__main__":
     app()
+
