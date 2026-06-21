@@ -63,6 +63,43 @@ class WebhookConfig(BaseModel):
         return v
 
 
+class ChatBeaconConfig(BaseModel):
+    """Slack or Discord incoming-webhook beacon configuration.
+
+    When ``url`` is set, ``canary check`` will POST a short, rendered
+    message per fire to the configured chat webhook in addition to the
+    always-on file/log beacons.
+    """
+
+    url: str | None = None
+    timeout: float = 5.0
+    max_attempts: int = 3
+    backoff: float = 0.5
+    headers: dict[str, str] = Field(default_factory=dict)
+    snippet_chars: int = 240
+
+    @field_validator("timeout")
+    @classmethod
+    def _timeout_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("timeout must be > 0")
+        return v
+
+    @field_validator("max_attempts")
+    @classmethod
+    def _attempts_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_attempts must be >= 1")
+        return v
+
+    @field_validator("snippet_chars")
+    @classmethod
+    def _snippet_nonneg(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("snippet_chars must be >= 0")
+        return v
+
+
 class CageConfig(BaseModel):
     """Top-level config document loaded from ``canary.toml``.
 
@@ -75,6 +112,8 @@ class CageConfig(BaseModel):
     ignore: list[str] = Field(default_factory=list)
     density: float = 1.0
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
+    slack: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
+    discord: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
 
     @field_validator("density")
     @classmethod
@@ -138,9 +177,10 @@ def load_config(root: Path) -> CageConfig:
     # planting knobs in their TOML.
     beacons = data.get("beacons")
     if isinstance(beacons, dict):
-        wh = beacons.get("webhook")
-        if isinstance(wh, dict) and "webhook" not in section:
-            section = {**section, "webhook": wh}
+        for key in ("webhook", "slack", "discord"):
+            sub = beacons.get(key)
+            if isinstance(sub, dict) and key not in section:
+                section = {**section, key: sub}
     preset = section.get("preset")
     if preset is not None:
         if preset not in PRESETS:
@@ -186,6 +226,18 @@ density = 1.0
 # max_attempts = 3
 # backoff = 0.5
 # headers = { Authorization = "Bearer ${CANARY_WEBHOOK_TOKEN}" }
+
+# Optional Slack incoming-webhook beacon. When `url` is set, every fire
+# is rendered as a short message and POSTed to the channel.
+# [beacons.slack]
+# url = "https://hooks.slack.com/services/T000/B000/XXX"
+# snippet_chars = 240
+
+# Optional Discord webhook beacon. Same shape as Slack — set `url` and
+# every fire pings the channel.
+# [beacons.discord]
+# url = "https://discord.com/api/webhooks/000/XXX"
+# snippet_chars = 240
 """
 
 

@@ -120,6 +120,26 @@ If every retry fails the record is appended to
 `.canary-cage/webhook.dead` so you never lose a fire to a flaky
 receiver.
 
+### Slack / Discord beacon
+
+Ping a chat channel the second a canary fires. Both Slack and Discord
+expose incoming-webhook URLs; drop one (or both) into `canary.toml`:
+
+```toml
+[beacons.slack]
+url = "https://hooks.slack.com/services/T000/B000/XXX"
+snippet_chars = 240   # bytes of the affected file to attach (0 disables)
+
+[beacons.discord]
+url = "https://discord.com/api/webhooks/000/XXX"
+```
+
+Each fire is rendered as a short message with the canary id, type,
+source, the affected path, and an optional code-block snippet of the
+file contents so the on-call human can eyeball what the agent touched
+without leaving the chat. Same retry + dead-letter behaviour as the raw
+webhook beacon (failed deliveries land in `.canary-cage/chat.dead`).
+
 ## Development
 
 ```bash

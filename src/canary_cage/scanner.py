@@ -22,7 +22,15 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 
-from .beacons import Beacon, BeaconRecord, FileBeacon, LogBeacon, WebhookBeacon
+from .beacons import (
+    Beacon,
+    BeaconRecord,
+    DiscordBeacon,
+    FileBeacon,
+    LogBeacon,
+    SlackBeacon,
+    WebhookBeacon,
+)
 from .beacons.file import FIRED_DIR_NAME
 from .config import load_config
 from .state import STATE_DIR_NAME, PlantedCanary, load_state
@@ -55,6 +63,28 @@ def beacons_for(root: Path) -> list[Beacon]:
                 max_attempts=cfg.webhook.max_attempts,
                 backoff=cfg.webhook.backoff,
                 headers=dict(cfg.webhook.headers),
+            )
+        )
+    if cfg.slack.url:
+        sinks.append(
+            SlackBeacon(
+                url=cfg.slack.url,
+                timeout=cfg.slack.timeout,
+                max_attempts=cfg.slack.max_attempts,
+                backoff=cfg.slack.backoff,
+                headers=dict(cfg.slack.headers),
+                snippet_chars=cfg.slack.snippet_chars,
+            )
+        )
+    if cfg.discord.url:
+        sinks.append(
+            DiscordBeacon(
+                url=cfg.discord.url,
+                timeout=cfg.discord.timeout,
+                max_attempts=cfg.discord.max_attempts,
+                backoff=cfg.discord.backoff,
+                headers=dict(cfg.discord.headers),
+                snippet_chars=cfg.discord.snippet_chars,
             )
         )
     return sinks
