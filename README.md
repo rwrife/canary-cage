@@ -4,34 +4,54 @@
 
 **Status:** v0.1 in progress. See [PLAN.md](./PLAN.md).
 
+## Install
+
+```bash
+# Recommended: isolated install via pipx
+pipx install canary-cage
+
+# Or, from a checkout for development:
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+```
+
+Requires Python 3.11+. The package has zero non-stdlib runtime deps
+beyond `typer`, `rich`, and `pydantic` — the webhook beacon uses
+`urllib`, so install size stays small.
+
+
 ## Why
 
 Agentjacking — where attackers poison content your AI coding agent reads (READMEs, issues, deps) to trick it into running their code — is now a real, named class of attack ([The Hacker News, June 2026](https://thehackernews.com/2026/06/agentjacking-attack-tricks-ai-coding.html)). `canary-cage` lets you proactively place tripwires in your own repo so you find out *the instant* something bites.
 
 ## Quickstart
 
-M1 ships the CLI skeleton — `plant`/`list`/`check`/`uproot` are stubbed and land in later milestones.
-
 ```bash
-# from a checkout (PyPI release comes with M6)
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-
-canary --version
-canary hello
-canary --help
+canary init --preset chaotic-good   # write canary.toml
+canary plant                        # seed tripwires into the repo
+canary list                         # see what's in the cage
+# ... let your agent loose on the repo ...
+canary check                        # exit 1 if anything fired
+canary uproot                       # restore the repo cleanly
 ```
 
-Coming soon:
+A typical session looks like:
 
-```bash
-pipx install canary-cage
-canary plant            # plant all three canary types
-canary list             # see what's in the cage
-# ... let your agent loose ...
-canary check
-canary uproot           # restore the repo cleanly
+```text
+$ canary plant
+🐤 planted 7 canaries → /repo/.canary-cage/state.json
+
+$ canary check
+🚨 1 canary fire(s) detected
+┏━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
+┃ canary_id  ┃ type      ┃ source        ┃ detail                 ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
+│ md-9f3a…  │ markdown  │ working-tree  │ sentinel missing       │
+└──────────┴───────────┴─────────────┴──────────────────┘
 ```
+
+> Want to record a real asciinema for the README? `asciinema rec demo.cast`
+> while running the snippet above, then `asciinema upload demo.cast`.
 
 As of **M4**, `plant`, `list`, `check`, and `uproot` are real. `--type` accepts
 `markdown`, `docstring`, `todo`, or `all` (the default).
@@ -66,6 +86,39 @@ density = 1.0   # 0.0–1.0
 
 Explicit fields always win over preset defaults. `.canary-cage/**` and
 `.git/**` are always ignored.
+
+### Webhook beacon (M6)
+
+Add a `[beacons.webhook]` table to `canary.toml` to POST every fire as
+JSON to your endpoint of choice — Slack/Discord/PagerDuty-compatible
+bridges, your own collector, anything that speaks HTTP. The always-on
+`file` and `log` beacons keep running too.
+
+```toml
+[beacons.webhook]
+url = "https://hooks.example.com/canary-fires"
+timeout = 5.0        # seconds per attempt
+max_attempts = 3     # exponential backoff between attempts
+backoff = 0.5        # base delay in seconds
+headers = { Authorization = "Bearer s3cr3t" }
+```
+
+Payload shape:
+
+```json
+{
+  "canary_id": "md-9f3ac1",
+  "canary_type": "markdown",
+  "source": "working-tree",
+  "detail": "sentinel missing from README.md",
+  "path": "README.md",
+  "detected_at": "2026-06-20T17:40:00Z"
+}
+```
+
+If every retry fails the record is appended to
+`.canary-cage/webhook.dead` so you never lose a fire to a flaky
+receiver.
 
 ## Development
 
