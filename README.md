@@ -140,6 +140,29 @@ file contents so the on-call human can eyeball what the agent touched
 without leaving the chat. Same retry + dead-letter behaviour as the raw
 webhook beacon (failed deliveries land in `.canary-cage/chat.dead`).
 
+### MCP server mode
+
+Expose canary status as MCP tools so *trusted* agents can self-attest
+and avoid tripping planted tripwires. The server speaks JSON-RPC 2.0
+over stdio — point your MCP host at:
+
+```bash
+canary mcp
+```
+
+Three tools are advertised:
+
+- `canary_list` — every planted canary (id, type, path, marker preview)
+  so the agent knows what to ignore.
+- `canary_status` — counts by type, attestation count, last detected
+  fire.
+- `canary_attest` — record an agent self-identification
+  (`{ "agent": "claude-code", "purpose": "refactor" }`). Stored at
+  `.canary-cage/attestations.json`.
+
+A jailed or jacked agent that hasn't read the MCP tool won't know what
+to avoid — which is exactly the point.
+
 ## Development
 
 ```bash
