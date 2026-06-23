@@ -19,6 +19,7 @@ from .config import (
     write_default_config,
 )
 from .mcp import serve as serve_mcp
+from .precommit import check_staged, install_hook
 from .scanner import scan
 from .state import CageState, load_state, save_state, state_path
 
@@ -247,6 +248,55 @@ def uproot(
         f"🧹 uprooted [bold]{removed}[/bold] canar"
         f"{'y' if removed == 1 else 'ies'}."
     )
+
+
+@app.command()
+def precommit(
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Block commits that remove canaries or leak fired-beacon files.
+
+    Designed to be invoked from ``.git/hooks/pre-commit``. Exits 0 when
+    the staged diff is clean, 1 when violations are found.
+    """
+
+    root = _resolve_root(root)
+    violations = check_staged(root)
+    if not violations:
+        console.print("🐤 [green]canary-cage: staged diff looks clean.[/green]")
+        return
+
+    table = Table(title=f"🚫 {len(violations)} canary-cage pre-commit violation(s)")
+    table.add_column("kind", style="red", no_wrap=True)
+    table.add_column("path", style="green")
+    table.add_column("detail", style="yellow")
+    for v in violations:
+        table.add_row(v.kind, v.path, v.detail)
+    console.print(table)
+    raise typer.Exit(code=1)
+
+
+@app.command("install-hook")
+def install_hook_cmd(
+    root: Path | None = _ROOT_OPTION,
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Overwrite an existing pre-commit hook."
+    ),
+) -> None:
+    """Install a ``.git/hooks/pre-commit`` that runs ``canary precommit``."""
+
+    root = _resolve_root(root)
+    try:
+        path = install_hook(root, force=force)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from None
+    except FileExistsError as exc:
+        console.print(
+            f"[yellow]pre-commit hook already exists at {exc} — pass --force to overwrite.[/yellow]"
+        )
+        raise typer.Exit(code=1) from None
+    console.print(f"🪵 installed pre-commit hook at {path}")
 
 
 @app.command()

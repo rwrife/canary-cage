@@ -163,6 +163,22 @@ Three tools are advertised:
 A jailed or jacked agent that hasn't read the MCP tool won't know what
 to avoid — which is exactly the point.
 
+### Pre-commit guardrail
+
+Install a git hook that blocks two classes of accidents:
+
+- Commits that *remove* a planted canary without `canary uproot` (so an
+  agent — or a careless human — can't quietly excise a tripwire).
+- Commits that stage anything under `.canary-cage/fired/` or
+  `.canary-cage/beacon.log` (forensic evidence of a fire stays local).
+
+```bash
+canary install-hook        # writes .git/hooks/pre-commit
+canary precommit           # what the hook runs; exits 1 on violations
+```
+
+Use `--force` to overwrite an existing pre-commit hook.
+
 ## Development
 
 ```bash
