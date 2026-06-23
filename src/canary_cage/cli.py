@@ -18,6 +18,7 @@ from .config import (
     load_config,
     write_default_config,
 )
+from .mcp import serve as serve_mcp
 from .scanner import scan
 from .state import CageState, load_state, save_state, state_path
 
@@ -246,6 +247,23 @@ def uproot(
         f"🧹 uprooted [bold]{removed}[/bold] canar"
         f"{'y' if removed == 1 else 'ies'}."
     )
+
+
+@app.command()
+def mcp(
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Run the MCP server (JSON-RPC over stdio).
+
+    Trusted agents can connect to discover planted canaries and avoid
+    tripping them. See README for the wire protocol.
+    """
+
+    root = _resolve_root(root)
+    try:
+        serve_mcp(root)
+    except KeyboardInterrupt:
+        raise typer.Exit(code=0) from None
 
 
 if __name__ == "__main__":
