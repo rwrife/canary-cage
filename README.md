@@ -179,6 +179,17 @@ canary precommit           # what the hook runs; exits 1 on violations
 
 Use `--force` to overwrite an existing pre-commit hook.
 
+## Editor integration
+
+A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).
+It reads `.canary-cage/state.json` and decorates every planted line with a
+🐤 gutter icon plus a hover bubble so you don't accidentally hand-edit a
+tripwire. Load it as a development extension:
+
+```bash
+code --extensionDevelopmentPath=$(pwd)/vscode-extension /path/to/your/repo
+```
+
 ## Development
 
 ```bash
