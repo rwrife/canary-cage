@@ -1,0 +1,29 @@
+{
+  "name": "canary-cage-vscode",
+  "displayName": "canary-cage",
+  "description": "Highlights planted canary-cage tripwires in the editor with a 🐤 gutter icon and hover info.",
+  "version": "0.1.0",
+  "publisher": "rwrife",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rwrife/canary-cage.git",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "canaryCage.refresh",
+        "title": "Canary Cage: Refresh planted canaries"
+      }
+    ]
+  }
+}
