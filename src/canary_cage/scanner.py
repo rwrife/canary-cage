@@ -41,7 +41,22 @@ _SENTINELS = {
     "markdown": "canary-cage:md:BEGIN:",
     "docstring": "canary-cage:py:BEGIN:",
     "todo": "canary-cage:todo:BEGIN:",
+    "manifest": "canary-cage:manifest:BEGIN:",
 }
+
+# Lockfiles to scan for typosquat-trap package mentions. The presence of
+# a fake canary-trip-<marker> package in any of these is a strong signal
+# that an agent tried to resolve/install the trap.
+_LOCKFILES: tuple[str, ...] = (
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "requirements.lock",
+    "requirements.txt.lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+)
 
 
 def default_beacons() -> list[Beacon]:
@@ -210,6 +225,44 @@ def _check_git_history(
     return out
 
 
+def _check_lockfile_mentions(
+    root: Path, canaries: Iterable[PlantedCanary]
+) -> list[BeaconRecord]:
+    """Flag any manifest canary whose fake package shows up in a lockfile."""
+    out: list[BeaconRecord] = []
+    manifest_canaries = [c for c in canaries if c.type == "manifest"]
+    if not manifest_canaries:
+        return out
+    for name in _LOCKFILES:
+        for lock_path in sorted(root.glob(f"**/{name}")):
+            try:
+                rel = lock_path.relative_to(root)
+            except ValueError:
+                continue
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            try:
+                text = lock_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            for canary in manifest_canaries:
+                needle = f"canary-trip-{canary.marker}"
+                if needle in text:
+                    out.append(
+                        BeaconRecord(
+                            canary_id=canary.id,
+                            canary_type=canary.type,
+                            source="lockfile",
+                            detail=(
+                                f"trap package {needle} appears in {rel} — "
+                                "agent likely tried to resolve it."
+                            ),
+                            path=str(rel),
+                        )
+                    )
+    return out
+
+
 def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconRecord]:
     """Run all signal checks and fire beacons for each detected event."""
     sinks = list(beacons) if beacons is not None else beacons_for(root)
@@ -223,6 +276,7 @@ def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconReco
 
     fires.extend(_check_stray_fire_files(root, state.canaries))
     fires.extend(_check_git_history(root, state.canaries))
+    fires.extend(_check_lockfile_mentions(root, state.canaries))
 
     for rec in fires:
         for sink in sinks:

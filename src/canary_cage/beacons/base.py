@@ -13,7 +13,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
-FireSource = Literal["working-tree", "git-history", "stray-file"]
+FireSource = Literal["working-tree", "git-history", "stray-file", "lockfile"]
 
 
 class BeaconRecord(BaseModel):
