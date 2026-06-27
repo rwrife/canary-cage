@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -127,6 +128,14 @@ def init(
 def plant(
     type: str = _TYPE_OPTION,
     root: Path | None = _ROOT_OPTION,
+    arm_at: str | None = typer.Option(
+        None,
+        "--arm-at",
+        help=(
+            "ISO-8601 timestamp (UTC if no tz) before which planted canaries "
+            "stay dormant. Overrides any [canary] arm_at in canary.toml."
+        ),
+    ),
 ) -> None:
     """Plant canaries across the repo and record them in state."""
 
@@ -137,6 +146,18 @@ def plant(
         console.print(f"[red]bad {CONFIG_FILE_NAME}: {exc}[/red]")
         raise typer.Exit(code=2) from exc
     plant_filter = PlantFilter(config)
+
+    arm_dt: datetime | None = None
+    if arm_at is not None:
+        try:
+            arm_dt = _parse_iso_utc(arm_at)
+        except ValueError as exc:
+            console.print(f"[red]bad --arm-at: {exc}[/red]")
+            raise typer.Exit(code=2) from exc
+    elif config.arm_at is not None:
+        arm_dt = config.arm_at
+        if arm_dt.tzinfo is None:
+            arm_dt = arm_dt.replace(tzinfo=UTC)
 
     if type == "all":
         types = tuple(config.types)
@@ -156,6 +177,10 @@ def plant(
     newly_planted = []
     for t in types:
         newly_planted.extend(_CANARY_REGISTRY[t]().plant(root, plant_filter))
+
+    if arm_dt is not None:
+        for c in newly_planted:
+            c.armed_at = arm_dt
 
     if not newly_planted:
         console.print("[yellow]no eligible files found to plant in.[/yellow]")
@@ -188,12 +213,21 @@ def list_(
     table.add_column("type", style="magenta")
     table.add_column("path", style="green")
     table.add_column("planted_at", style="dim")
+    table.add_column("status", style="yellow")
+    now = datetime.now(UTC)
     for c in sorted(state.canaries, key=lambda x: (x.type, x.path)):
+        if c.armed_at is None:
+            status = "armed"
+        elif c.is_armed(now):
+            status = f"armed ({c.armed_at.strftime('%Y-%m-%d %H:%M:%SZ')})"
+        else:
+            status = f"dormant → {c.armed_at.strftime('%Y-%m-%d %H:%M:%SZ')}"
         table.add_row(
             c.id,
             c.type,
             c.path,
             c.planted_at.strftime("%Y-%m-%d %H:%M:%SZ"),
+            status,
         )
     console.print(table)
 
@@ -249,6 +283,46 @@ def uproot(
         f"🧹 uprooted [bold]{removed}[/bold] canar"
         f"{'y' if removed == 1 else 'ies'}."
     )
+
+
+@app.command()
+def arm(
+    canary_id: str = typer.Argument(..., help="Canary id (or prefix) to arm immediately."),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Manually arm a dormant (time-bomb) canary right now."""
+
+    root = _resolve_root(root)
+    state = load_state(root)
+    matches = [c for c in state.canaries if c.id == canary_id or c.id.startswith(canary_id)]
+    if not matches:
+        console.print(f"[red]no canary matches id {canary_id!r}[/red]")
+        raise typer.Exit(code=1)
+    if len(matches) > 1:
+        ids = ", ".join(c.id for c in matches)
+        console.print(f"[red]ambiguous id {canary_id!r} matches: {ids}[/red]")
+        raise typer.Exit(code=2)
+    target = matches[0]
+    if target.armed_at is None or target.is_armed():
+        console.print(f"[yellow]canary {target.id} is already armed.[/yellow]")
+        return
+    target.armed_at = datetime.now(UTC)
+    save_state(root, state)
+    console.print(f"🔔 armed canary {target.id} ({target.type} → {target.path}).")
+
+
+def _parse_iso_utc(raw: str) -> datetime:
+    """Parse an ISO-8601 timestamp, defaulting naive values to UTC."""
+    s = raw.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError as exc:
+        raise ValueError(f"not a valid ISO-8601 timestamp: {raw!r}") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 
 @app.command()

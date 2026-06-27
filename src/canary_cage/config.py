@@ -14,6 +14,7 @@ from __future__ import annotations
 import fnmatch
 import tomllib
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -111,6 +112,7 @@ class CageConfig(BaseModel):
     types: list[CanaryType] = Field(default_factory=lambda: list(ALL_TYPES))
     ignore: list[str] = Field(default_factory=list)
     density: float = 1.0
+    arm_at: datetime | None = None
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
     slack: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
     discord: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
@@ -217,6 +219,11 @@ ignore = [
 
 # Fraction of eligible files (per type) to actually plant in: 0.0–1.0.
 density = 1.0
+
+# Optional time-bomb: ISO-8601 timestamp before which planted canaries
+# stay dormant. `canary check` ignores dormant canaries; `canary list`
+# shows their activation date.
+# arm_at = "2026-09-01T00:00:00Z"
 
 # Optional webhook beacon. When `url` is set, `canary check` POSTs every
 # detected fire as JSON to the URL (file + log beacons still run too).

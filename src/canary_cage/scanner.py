@@ -269,14 +269,18 @@ def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconReco
     state = load_state(root)
     fires: list[BeaconRecord] = []
 
-    for canary in state.canaries:
+    # Dormant (time-bomb) canaries don't fire — they sit silently until
+    # their ``armed_at`` passes. Filter them out across every check.
+    armed = [c for c in state.canaries if c.is_armed()]
+
+    for canary in armed:
         rec = _check_working_tree(root, canary)
         if rec is not None:
             fires.append(rec)
 
-    fires.extend(_check_stray_fire_files(root, state.canaries))
-    fires.extend(_check_git_history(root, state.canaries))
-    fires.extend(_check_lockfile_mentions(root, state.canaries))
+    fires.extend(_check_stray_fire_files(root, armed))
+    fires.extend(_check_git_history(root, armed))
+    fires.extend(_check_lockfile_mentions(root, armed))
 
     for rec in fires:
         for sink in sinks:
