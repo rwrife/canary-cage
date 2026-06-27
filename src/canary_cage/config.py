@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field, field_validator
 
 CONFIG_FILE_NAME = "canary.toml"
 
-CanaryType = Literal["markdown", "docstring", "todo"]
-ALL_TYPES: tuple[CanaryType, ...] = ("markdown", "docstring", "todo")
+CanaryType = Literal["markdown", "docstring", "todo", "manifest"]
+ALL_TYPES: tuple[CanaryType, ...] = ("markdown", "docstring", "todo", "manifest")
 
 PresetName = Literal["minimal", "paranoid", "chaotic-good"]
 
@@ -205,8 +205,8 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # preset = "chaotic-good"  # all types, ~half of eligible files
 # preset = "paranoid"      # all types, everywhere
 
-# Canary types to plant. Subset of: "markdown", "docstring", "todo".
-types = ["markdown", "docstring", "todo"]
+# Canary types to plant. Subset of: "markdown", "docstring", "todo", "manifest".
+types = ["markdown", "docstring", "todo", "manifest"]
 
 # Glob patterns (relative to repo root) to skip when planting.
 # .canary-cage/** and .git/** are always ignored.

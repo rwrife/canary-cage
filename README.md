@@ -54,7 +54,13 @@ $ canary check
 > while running the snippet above, then `asciinema upload demo.cast`.
 
 As of **M4**, `plant`, `list`, `check`, and `uproot` are real. `--type` accepts
-`markdown`, `docstring`, `todo`, or `all` (the default).
+`markdown`, `docstring`, `todo`, `manifest`, or `all` (the default).
+
+The **manifest** canary plants a fake `canary-trip-<id>==0.0.0` package
+into `requirements.txt` / `pyproject.toml` as a typosquat trap. `canary
+check` fires if the trap line gets mutated/removed or if the fake
+package ends up in a lockfile (`uv.lock`, `package-lock.json`, etc.) —
+a strong signal an agent tried to resolve the bogus dep.
 
 `canary check` scans the working tree for missing canary sentinels, looks
 for stray fire artifacts in `.canary-cage/fired/`, and greps git history
@@ -79,7 +85,7 @@ canary init --preset paranoid     # …or seed it with a named preset
 # preset = "chaotic-good"  # all types, ~half of eligible files
 # preset = "paranoid"      # all types, everywhere
 
-types = ["markdown", "docstring", "todo"]
+types = ["markdown", "docstring", "todo", "manifest"]
 ignore = ["docs/**", "vendor/**"]
 density = 1.0   # 0.0–1.0
 ```

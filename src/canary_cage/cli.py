@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .canaries import DocstringCanary, MarkdownCanary, TodoCanary
+from .canaries import DocstringCanary, ManifestCanary, MarkdownCanary, TodoCanary
 from .config import (
     CONFIG_FILE_NAME,
     PRESETS,
@@ -36,6 +36,7 @@ _CANARY_REGISTRY = {
     "markdown": MarkdownCanary,
     "docstring": DocstringCanary,
     "todo": TodoCanary,
+    "manifest": ManifestCanary,
 }
 
 
@@ -69,7 +70,7 @@ _TYPE_OPTION = typer.Option(
     "all",
     "--type",
     "-t",
-    help="Canary type to plant: markdown, docstring, todo, or 'all'.",
+    help="Canary type to plant: markdown, docstring, todo, manifest, or 'all'.",
 )
 _ROOT_OPTION = typer.Option(
     None,
