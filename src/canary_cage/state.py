@@ -33,6 +33,22 @@ class PlantedCanary(BaseModel):
     path: str
     marker: str
     planted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Time-bomb: when set, the canary is dormant until ``armed_at`` has
+    # passed. ``None`` means "always armed" — the historical behaviour.
+    armed_at: datetime | None = None
+
+    def is_armed(self, now: datetime | None = None) -> bool:
+        """Return True if the canary is currently armed (live)."""
+        if self.armed_at is None:
+            return True
+        current = now if now is not None else datetime.now(UTC)
+        # Coerce naive datetimes to UTC so comparisons never explode.
+        armed = self.armed_at
+        if armed.tzinfo is None:
+            armed = armed.replace(tzinfo=UTC)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=UTC)
+        return current >= armed
 
 
 class CageState(BaseModel):

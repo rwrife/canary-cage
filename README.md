@@ -69,6 +69,20 @@ for canary markers. Each detected fire is recorded by the **file beacon**
 (`.canary-cage/beacon.log`). The command exits non-zero when at least one
 fire is detected so it slots cleanly into CI.
 
+### Time-bomb canaries
+
+Plant tripwires today that stay dormant until a future date:
+
+```bash
+canary plant --arm-at 2026-09-01T00:00:00Z
+```
+
+Dormant canaries are skipped by `canary check` and show as `dormant → <date>`
+in `canary list`. Once the timestamp passes they arm automatically. Flip one
+manually any time with `canary arm <id>` (or any unambiguous prefix).
+You can also set `arm_at = "2026-09-01T00:00:00Z"` under `[canary]` in
+`canary.toml` to apply the same default to every plant.
+
 ### Configuration (M5)
 
 Drop a `canary.toml` at the repo root to tune which types get planted,
