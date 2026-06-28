@@ -199,6 +199,57 @@ canary precommit           # what the hook runs; exits 1 on violations
 
 Use `--force` to overwrite an existing pre-commit hook.
 
+## `canary diff` — what mutated since plant
+
+`canary check` answers *did something fire?* `canary diff` answers
+*what changed, where, and how bad?* It walks every planted canary,
+recomputes whether the BEGIN/END sentinel block is still intact, and
+rolls in any independent fire signals (stray artifacts, lockfile traps).
+
+```bash
+canary diff                      # grouped Rich tables, one per canary type
+canary diff --json               # stable, machine-readable schema for CI
+canary diff --since <git-ref>    # only show canaries whose file changed since <ref>
+```
+
+Verdicts:
+
+- **intact**  — sentinel block present and unmodified
+- **mutated** — BEGIN sentinel present, END sentinel missing or payload tampered
+- **removed** — planted file vanished, or BEGIN sentinel gone
+- **fired**   — independent evidence of a fire (stray artifact, lockfile, etc.)
+
+Exit code is `1` when any verdict is mutated / removed / fired, so the
+command drops cleanly into CI.
+
+The `--json` payload looks like:
+
+```json
+{
+  "schema_version": 1,
+  "root": "/repo",
+  "since": null,
+  "total_planted": 3,
+  "groups": [
+    {
+      "canary_type": "markdown",
+      "items": [
+        {
+          "canary_id": "md-abc123",
+          "canary_type": "markdown",
+          "path": "README.md",
+          "verdict": "mutated",
+          "detail": "END sentinel missing…",
+          "expected": "canary-cage:md:END:abc123",
+          "actual": "…snippet…",
+          "fire_sources": []
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Editor integration
 
 A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).
