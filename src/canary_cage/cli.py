@@ -19,6 +19,13 @@ from .config import (
     load_config,
     write_default_config,
 )
+from .diff import (
+    VERDICT_FIRED,
+    VERDICT_INTACT,
+    VERDICT_MUTATED,
+    VERDICT_REMOVED,
+    compute_diff,
+)
 from .mcp import serve as serve_mcp
 from .precommit import check_staged, install_hook
 from .scanner import scan
@@ -253,6 +260,92 @@ def check(
         table.add_row(rec.canary_id, rec.canary_type, rec.source, rec.detail)
     console.print(table)
     raise typer.Exit(code=1)
+
+
+_VERDICT_STYLE = {
+    VERDICT_INTACT: "green",
+    VERDICT_MUTATED: "yellow",
+    VERDICT_REMOVED: "red",
+    VERDICT_FIRED: "bold red",
+}
+
+
+@app.command()
+def diff(
+    root: Path | None = _ROOT_OPTION,
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit machine-readable JSON instead of a table."
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Limit diff to canaries whose file changed in git since <ref>.",
+    ),
+) -> None:
+    """Show what changed since plant, attributed by canary type."""
+
+    import json as _json
+
+    root = _resolve_root(root)
+    report = compute_diff(root, since=since)
+
+    if json_out:
+        console.print_json(_json.dumps(report.to_dict()))
+        bad = (VERDICT_MUTATED, VERDICT_REMOVED, VERDICT_FIRED)
+        if any(d.verdict in bad for d in report.diffs):
+            raise typer.Exit(code=1)
+        return
+
+    if not report.diffs:
+        if report.total_planted == 0:
+            console.print("[yellow]no canaries planted — nothing to diff.[/yellow]")
+        else:
+            console.print(
+                f"🐤 [green]no diff — {report.total_planted} canar"
+                f"{'y' if report.total_planted == 1 else 'ies'} unchanged"
+                + (f" since {since}" if since else "")
+                + ".[/green]"
+            )
+        return
+
+    if all(d.verdict == VERDICT_INTACT for d in report.diffs):
+        n = len(report.diffs)
+        console.print(
+            f"🐤 [green]no diff — {n} canar{'y' if n == 1 else 'ies'} unchanged"
+            + (f" since {since}" if since else "")
+            + ".[/green]"
+        )
+        return
+
+    grouped: dict[str, list] = {}
+    for d in report.diffs:
+        grouped.setdefault(d.canary_type, []).append(d)
+
+    for ctype, items in sorted(grouped.items()):
+        table = Table(title=f"🐤 {ctype} ({len(items)})")
+        table.add_column("id", style="cyan", no_wrap=True)
+        table.add_column("path", style="green")
+        table.add_column("verdict")
+        table.add_column("detail", style="dim")
+        for d in items:
+            style = _VERDICT_STYLE.get(d.verdict, "white")
+            table.add_row(
+                d.canary_id,
+                d.path,
+                f"[{style}]{d.verdict}[/{style}]",
+                d.detail,
+            )
+        console.print(table)
+
+    summary = report.summary()
+    _order = (VERDICT_INTACT, VERDICT_MUTATED, VERDICT_REMOVED, VERDICT_FIRED)
+    parts = [f"{v}={summary.get(v, 0)}" for v in _order]
+    console.print("  ".join(parts))
+    if any(
+        d.verdict in (VERDICT_MUTATED, VERDICT_REMOVED, VERDICT_FIRED)
+        for d in report.diffs
+    ):
+        raise typer.Exit(code=1)
 
 
 @app.command()
