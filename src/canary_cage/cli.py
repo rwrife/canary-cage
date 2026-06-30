@@ -26,6 +26,11 @@ from .diff import (
     VERDICT_REMOVED,
     compute_diff,
 )
+from .fingerprint import (
+    Fingerprinter,
+    context_from_canary,
+    identify_for_canary_id,
+)
 from .mcp import serve as serve_mcp
 from .precommit import check_staged, install_hook
 from .scanner import scan
@@ -242,11 +247,53 @@ def list_(
 @app.command()
 def check(
     root: Path | None = _ROOT_OPTION,
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit machine-readable JSON instead of a table."
+    ),
 ) -> None:
     """Scan for evidence a canary fired and fire beacons for each hit."""
 
+    import json as _json
+
     root = _resolve_root(root)
     fires = scan(root)
+
+    # Attribute each fire to a likely agent (additive — never breaks existing
+    # consumers; `attributed_to` is just a new optional field).
+    fp = Fingerprinter(root=root)
+    state = load_state(root)
+    canaries_by_id = {c.id: c for c in state.canaries}
+    attributions: list[dict[str, object] | None] = []
+    for rec in fires:
+        canary = canaries_by_id.get(rec.canary_id)
+        if canary is None:
+            attributions.append(None)
+            continue
+        ctx = context_from_canary(root, canary)
+        report = fp.identify(ctx)
+        attributions.append(report.to_dict() if report.candidates else None)
+
+    if json_out:
+        payload = {
+            "schema_version": 1,
+            "root": str(root),
+            "fires": [
+                {
+                    "canary_id": rec.canary_id,
+                    "canary_type": rec.canary_type,
+                    "source": rec.source,
+                    "detail": rec.detail,
+                    "path": rec.path,
+                    "attributed_to": attr,
+                }
+                for rec, attr in zip(fires, attributions, strict=False)
+            ],
+        }
+        console.print_json(_json.dumps(payload))
+        if fires:
+            raise typer.Exit(code=1)
+        return
+
     if not fires:
         console.print("🐤 [green]all canaries singing — no fires detected.[/green]")
         return
@@ -255,9 +302,15 @@ def check(
     table.add_column("canary_id", style="cyan", no_wrap=True)
     table.add_column("type", style="magenta")
     table.add_column("source", style="yellow")
+    table.add_column("attributed_to", style="blue")
     table.add_column("detail", style="red")
-    for rec in fires:
-        table.add_row(rec.canary_id, rec.canary_type, rec.source, rec.detail)
+    for rec, attr in zip(fires, attributions, strict=False):
+        if attr and attr.get("top"):
+            top = attr["top"]
+            attributed = f"{top['agent']} ({top['confidence']:.2f})"
+        else:
+            attributed = "—"
+        table.add_row(rec.canary_id, rec.canary_type, rec.source, attributed, rec.detail)
     console.print(table)
     raise typer.Exit(code=1)
 
@@ -346,6 +399,72 @@ def diff(
         for d in report.diffs
     ):
         raise typer.Exit(code=1)
+
+
+@app.command()
+def fingerprint(
+    canary_id: str = typer.Argument(..., help="id of a planted (or recently fired) canary"),
+    root: Path | None = _ROOT_OPTION,
+    user_agent: str | None = typer.Option(
+        None, "--user-agent", help="Optional User-Agent string (e.g. from a webhook hit)."
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit JSON instead of a Rich table."
+    ),
+) -> None:
+    """Explain a single fire — which agent likely tripped this canary?"""
+
+    import json as _json
+
+    root = _resolve_root(root)
+    result = identify_for_canary_id(root, canary_id, user_agent=user_agent)
+    if result is None:
+        console.print(f"[red]no canary with id {canary_id!r} — nothing to fingerprint.[/red]")
+        raise typer.Exit(code=2)
+    ctx, report = result
+
+    if json_out:
+        payload = {
+            "canary_id": ctx.canary_id,
+            "canary_type": ctx.canary_type,
+            "path": ctx.path,
+            "commit_sha": ctx.commit_sha,
+            "commit_author": ctx.commit_author,
+            "user_agent": ctx.user_agent,
+            "attributed_to": report.to_dict(),
+        }
+        console.print_json(_json.dumps(payload))
+        return
+
+    if not report.candidates:
+        console.print(
+            f"🔍 [yellow]no agent matched any rule for {canary_id} — "
+            "could be a human, an unsupported agent, or a clean canary.[/yellow]"
+        )
+        if ctx.commit_author:
+            console.print(f"  last commit author on this path: {ctx.commit_author}")
+        return
+
+    table = Table(title=f"🔍 fingerprint for {canary_id}")
+    table.add_column("rank", style="dim", no_wrap=True)
+    table.add_column("agent", style="cyan")
+    table.add_column("confidence", style="green")
+    table.add_column("matched signals", style="yellow")
+    for i, cand in enumerate(report.candidates, start=1):
+        table.add_row(
+            str(i),
+            cand.display,
+            f"{cand.confidence:.2f}",
+            ", ".join(cand.signals),
+        )
+    console.print(table)
+    if ctx.commit_author or ctx.commit_sha:
+        bits = []
+        if ctx.commit_sha:
+            bits.append(f"commit={ctx.commit_sha[:12]}")
+        if ctx.commit_author:
+            bits.append(f"author={ctx.commit_author}")
+        console.print("  " + "  ".join(bits))
 
 
 @app.command()
