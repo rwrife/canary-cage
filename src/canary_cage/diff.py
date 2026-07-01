@@ -55,6 +55,7 @@ class CanaryDiff:
     expected: str | None = None
     actual: str | None = None
     fire_sources: list[str] = field(default_factory=list)
+    attributed_to: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -66,6 +67,7 @@ class CanaryDiff:
             "expected": self.expected,
             "actual": self.actual,
             "fire_sources": list(self.fire_sources),
+            "attributed_to": self.attributed_to,
         }
 
 
@@ -210,11 +212,14 @@ def _snippet_around(content: str, needle: str, radius: int = 80) -> str | None:
     return content[start:end]
 
 
-def compute_diff(root: Path, since: str | None = None) -> DiffReport:
+def compute_diff(root: Path, since: str | None = None, *, attribute: bool = True) -> DiffReport:
     """Compare the current tree against last-planted state.
 
     When ``since`` is provided, only canaries whose planted path changed
     in git since that ref are included in the diff.
+
+    When ``attribute`` is True (default), each non-intact diff is annotated
+    with an ``attributed_to`` block from the fingerprinter.
     """
     state = load_state(root)
     canaries: list[PlantedCanary] = list(state.canaries)
@@ -254,6 +259,24 @@ def compute_diff(root: Path, since: str | None = None) -> DiffReport:
     diffs.sort(
         key=lambda d: (-_VERDICT_RANK[d.verdict], d.canary_type, d.path, d.canary_id)
     )
+
+    if attribute:
+        # Lazy import to keep diff importable in minimal environments.
+        from .fingerprint import Fingerprinter, context_from_canary
+
+        state_by_id = {c.id: c for c in load_state(root).canaries}
+        fp = Fingerprinter(root=root)
+        for d in diffs:
+            if d.verdict == VERDICT_INTACT:
+                continue
+            canary = state_by_id.get(d.canary_id)
+            if canary is None:
+                continue
+            ctx = context_from_canary(root, canary)
+            report = fp.identify(ctx)
+            if report.candidates:
+                d.attributed_to = report.to_dict()
+
     return DiffReport(
         schema_version=DIFF_SCHEMA_VERSION,
         root=str(root),

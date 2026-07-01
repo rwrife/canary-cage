@@ -250,6 +250,71 @@ The `--json` payload looks like:
 }
 ```
 
+## Agent fingerprinting
+
+When a canary fires, `canary check` and `canary diff` don't just tell you
+*that* something took the bait — they take a heuristic guess at *who*.
+The fingerprinter scores each fire against a JSON rule pack and returns
+ranked candidates with confidence in `[0, 1]`.
+
+```bash
+# JSON output (additive `attributed_to` field; existing keys unchanged):
+$ canary check --json
+{
+  "fires": [{
+    "canary_id": "c1",
+    "source": "working-tree",
+    "attributed_to": {
+      "top": {"agent": "claude-code", "confidence": 0.74},
+      "candidates": [
+        {"agent": "claude-code", "display": "Claude Code (Anthropic)",
+         "confidence": 0.74,
+         "signals": ["claude.commit.coauthor", "claude.author.email", "claude.commit.signature"]}
+      ]
+    }
+  }]
+}
+
+# Single-canary explainer:
+$ canary fingerprint c1
+🔍 fingerprint for c1
+│ rank │ agent                    │ confidence │ matched signals                  │
+│ 1    │ Claude Code (Anthropic)  │ 0.74       │ claude.commit.coauthor, ...      │
+  commit=a1b2c3d4e5f6  author=Claude <noreply@anthropic.com>
+```
+
+Shipped agent classes: `claude-code`, `github-copilot`, `cursor`,
+`codex-cli`, plus a `generic-llm` catch-all. Each has 4+ heuristic rules
+spanning commit messages, commit authors, planted/observed content,
+repo paths, and (optional) HTTP `User-Agent` strings from webhook hits.
+
+### Extending the rule pack
+
+Drop a `fingerprints.json` at your repo root to add new agents or
+override bundled ones (override-by-name wins):
+
+```json
+{
+  "version": 1,
+  "agents": [
+    {
+      "agent": "my-internal-bot",
+      "display": "Internal Bot",
+      "rules": [
+        {"id": "mine.author", "weight": 0.5,
+         "field": "commit_author", "pattern": "(?i)my-bot\\[bot\\]"},
+        {"id": "mine.ua",      "weight": 0.5,
+         "field": "user_agent",   "pattern": "(?i)my-bot-agent"}
+      ]
+    }
+  ]
+}
+```
+
+Valid `field` values: `commit_message`, `commit_author`, `content`,
+`repo_paths`, `user_agent`. Rules are pure regex; any one rule's
+contribution is capped so a single weak hit can't pin confidence to 1.0.
+
 ## Editor integration
 
 A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).
