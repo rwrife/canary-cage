@@ -19,6 +19,7 @@ STATE_FILE_NAME = "state.json"
 SCHEMA_VERSION = 1
 
 CanaryType = Literal["markdown", "docstring", "todo", "manifest"]
+HoneyKind = Literal["issue", "pr"]
 
 
 class PlantedCanary(BaseModel):
@@ -51,11 +52,34 @@ class PlantedCanary(BaseModel):
         return current >= armed
 
 
+class HoneyArtifact(BaseModel):
+    """A canary-bearing GitHub issue or PR planted via ``gh``.
+
+    ``github_id`` is the issue/PR number (they share a namespace on
+    GitHub). ``body_snapshot`` is what we last saw on the server so
+    :func:`canary_cage.honey.check_honey_fires` can spot mutations.
+    ``last_comment_id`` tracks the newest comment id we've already
+    observed — anything newer counts as a fire.
+    """
+
+    id: str
+    kind: HoneyKind
+    repo: str  # "owner/name"
+    github_id: int
+    url: str
+    marker: str
+    body_snapshot: str
+    branch: str | None = None  # only for kind=="pr"
+    last_comment_id: int = 0
+    planted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class CageState(BaseModel):
     """Top-level state document persisted to ``state.json``."""
 
     schema_version: int = SCHEMA_VERSION
     canaries: list[PlantedCanary] = Field(default_factory=list)
+    honey: list[HoneyArtifact] = Field(default_factory=list)
 
 
 def state_dir(root: Path) -> Path:

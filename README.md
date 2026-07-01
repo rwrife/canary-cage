@@ -315,6 +315,34 @@ Valid `field` values: `commit_message`, `commit_author`, `content`,
 `repo_paths`, `user_agent`. Rules are pure regex; any one rule's
 contribution is capped so a single weak hit can't pin confidence to 1.0.
 
+## Honey issues & PRs (via `gh`)
+
+Agentjacking increasingly rides in through *GitHub issues and PRs* fed to an
+assistant (“triage this issue”, “review this PR”). `canary honey` plants
+canaries directly into issue bodies and PR descriptions so any agent that
+reads them via the GitHub API / MCP takes the bait the same way it would
+from a poisoned README.
+
+Requires the [`gh` CLI](https://cli.github.com) on `PATH` and
+`gh auth login` completed.
+
+```bash
+# Plant a labeled honey issue
+canary honey issue --repo owner/name --title "[bug] triage this"
+
+# Open a draft honey PR against main from an already-pushed branch
+canary honey pr --repo owner/name --branch honey/xyz --title "Please review"
+
+# Re-fetch every honey artifact and report edits / new comments
+canary honey check --json
+
+# Clean everything up (close by default; --honey-mode delete|strip also work)
+canary uproot --honey
+```
+
+Honey artifacts are tracked in `.canary-cage/state.json` under a new
+`honey` section and surface in `canary list` beside the local canaries.
+
 ## Editor integration
 
 A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).
