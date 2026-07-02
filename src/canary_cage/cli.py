@@ -31,10 +31,21 @@ from .fingerprint import (
     context_from_canary,
     identify_for_canary_id,
 )
+from .honey import (
+    DEFAULT_LABEL as HONEY_DEFAULT_LABEL,
+)
+from .honey import (
+    HoneyError,
+    check_honey_fires,
+    list_honey,
+    plant_honey_issue,
+    plant_honey_pr,
+    uproot_honey,
+)
 from .mcp import serve as serve_mcp
 from .precommit import check_staged, install_hook
 from .scanner import scan
-from .state import CageState, load_state, save_state, state_path
+from .state import load_state, save_state, state_path
 
 app = typer.Typer(
     name="canary",
@@ -42,6 +53,13 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+honey_app = typer.Typer(
+    name="honey",
+    help="🍯 Plant canaries into GitHub issues/PRs via `gh` (issue #28).",
+    no_args_is_help=True,
+)
+app.add_typer(honey_app, name="honey")
 
 console = Console()
 
@@ -242,6 +260,120 @@ def list_(
             status,
         )
     console.print(table)
+
+    state = load_state(root)  # reload to include honey if not already loaded
+    if state.honey:
+        htable = Table(title=f"🍯 honey ({len(state.honey)})")
+        htable.add_column("id", style="cyan", no_wrap=True)
+        htable.add_column("kind", style="magenta")
+        htable.add_column("repo", style="green")
+        htable.add_column("#", style="yellow", no_wrap=True)
+        htable.add_column("url", style="dim")
+        for h in sorted(state.honey, key=lambda x: (x.kind, x.repo, x.github_id)):
+            htable.add_row(h.id, h.kind, h.repo, str(h.github_id), h.url)
+        console.print(htable)
+
+
+@honey_app.command("issue")
+def honey_issue_cmd(
+    repo: str = typer.Option(..., "--repo", help="owner/name"),
+    title: str = typer.Option(..., "--title", help="Issue title."),
+    body: str = typer.Option("", "--body", help="Optional body prose; canary is appended."),
+    label: str = typer.Option(
+        HONEY_DEFAULT_LABEL, "--label", help="Label to apply (pass '' to skip)."
+    ),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Create a labeled honey issue with an embedded canary."""
+
+    root = _resolve_root(root)
+    try:
+        art = plant_honey_issue(root, repo=repo, title=title, body=body, label=label)
+    except HoneyError as exc:
+        console.print(f"[red]honey issue failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"🍯 planted issue [cyan]{art.id}[/cyan] → {art.url}")
+
+
+@honey_app.command("pr")
+def honey_pr_cmd(
+    repo: str = typer.Option(..., "--repo", help="owner/name"),
+    branch: str = typer.Option(..., "--branch", help="Head branch (must be pushed)."),
+    title: str = typer.Option(..., "--title", help="PR title."),
+    body: str = typer.Option("", "--body", help="Optional body prose; canary is appended."),
+    base: str = typer.Option("main", "--base", help="Base branch."),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Open a draft honey PR with an embedded canary body."""
+
+    root = _resolve_root(root)
+    try:
+        art = plant_honey_pr(
+            root, repo=repo, branch=branch, title=title, body=body, base=base
+        )
+    except HoneyError as exc:
+        console.print(f"[red]honey pr failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+    console.print(f"🍯 planted PR [cyan]{art.id}[/cyan] → {art.url}")
+
+
+@honey_app.command("list")
+def honey_list_cmd(root: Path | None = _ROOT_OPTION) -> None:
+    """List every planted honey artifact."""
+
+    root = _resolve_root(root)
+    artifacts = list_honey(root)
+    if not artifacts:
+        console.print("[yellow]no honey artifacts — run `canary honey issue|pr`.[/yellow]")
+        return
+    table = Table(title=f"🍯 honey ({len(artifacts)})")
+    table.add_column("id", style="cyan", no_wrap=True)
+    table.add_column("kind", style="magenta")
+    table.add_column("repo", style="green")
+    table.add_column("#", style="yellow", no_wrap=True)
+    table.add_column("url", style="dim")
+    for h in artifacts:
+        table.add_row(h.id, h.kind, h.repo, str(h.github_id), h.url)
+    console.print(table)
+
+
+@honey_app.command("check")
+def honey_check_cmd(
+    root: Path | None = _ROOT_OPTION,
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Re-fetch honey artifacts via `gh` and report mutations/comments."""
+
+    import json as _json
+
+    root = _resolve_root(root)
+    try:
+        fires = check_honey_fires(root)
+    except HoneyError as exc:
+        console.print(f"[red]honey check failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if json_out:
+        payload = [
+            {"artifact_id": f.artifact_id, "kind": f.kind, "detail": f.detail}
+            for f in fires
+        ]
+        console.print_json(_json.dumps(payload))
+        if fires:
+            raise typer.Exit(code=1)
+        return
+
+    if not fires:
+        console.print("🐤 [green]no honey fires — all quiet.[/green]")
+        return
+    table = Table(title=f"🍯 honey fires ({len(fires)})")
+    table.add_column("artifact", style="cyan")
+    table.add_column("kind", style="red")
+    table.add_column("detail", style="dim")
+    for f in fires:
+        table.add_row(f.artifact_id, f.kind, f.detail)
+    console.print(table)
+    raise typer.Exit(code=1)
 
 
 @app.command()
@@ -470,12 +602,22 @@ def fingerprint(
 @app.command()
 def uproot(
     root: Path | None = _ROOT_OPTION,
+    honey: bool = typer.Option(
+        False,
+        "--honey",
+        help="Also clean up honey issues/PRs planted via `canary honey`.",
+    ),
+    honey_mode: str = typer.Option(
+        "close",
+        "--honey-mode",
+        help="How to dispose of honey artifacts: close | delete | strip.",
+    ),
 ) -> None:
     """Remove every planted canary and clear state."""
 
     root = _resolve_root(root)
     state = load_state(root)
-    if not state.canaries:
+    if not state.canaries and not honey:
         console.print("[yellow]no canaries planted — nothing to uproot.[/yellow]")
         return
 
@@ -490,11 +632,33 @@ def uproot(
         canary_cls().uproot(root, planted)
         removed += 1
 
-    save_state(root, CageState())
+    honey_removed = 0
+    if honey:
+        if honey_mode not in ("close", "delete", "strip"):
+            console.print(
+                f"[red]invalid --honey-mode {honey_mode!r} (expected close|delete|strip)[/red]"
+            )
+            raise typer.Exit(code=2)
+        try:
+            honey_removed = uproot_honey(root, mode=honey_mode)  # type: ignore[arg-type]
+        except HoneyError as exc:
+            console.print(f"[red]honey uproot failed:[/red] {exc}")
+            raise typer.Exit(code=1) from exc
+
+    # Reload state so we don't clobber honey cleanup above.
+    fresh = load_state(root)
+    fresh.canaries = []
+    save_state(root, fresh)
     console.print(
         f"🧹 uprooted [bold]{removed}[/bold] canar"
         f"{'y' if removed == 1 else 'ies'}."
     )
+
+    if honey:
+        console.print(
+            f"🍯 uprooted [bold]{honey_removed}[/bold] honey artifact"
+            f"{'' if honey_removed == 1 else 's'} ({honey_mode})."
+        )
 
 
 @app.command()
