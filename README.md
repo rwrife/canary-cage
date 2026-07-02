@@ -343,6 +343,54 @@ canary uproot --honey
 Honey artifacts are tracked in `.canary-cage/state.json` under a new
 `honey` section and surface in `canary list` beside the local canaries.
 
+## OpenTelemetry exporter
+
+Wire canary fires into your existing observability stack instead of
+tailing `.canary-cage/beacon.log`. The OpenTelemetry beacon emits one
+span per fire (with a matching `canary.fire` event) using the standard
+`OTEL_EXPORTER_OTLP_*` env-var contract, so anything OTLP-compatible
+works: Honeycomb, Grafana Tempo, Datadog, Jaeger, self-hosted
+collectors, you name it.
+
+Install the extras and enable the beacon:
+
+```bash
+pip install 'canary-cage[otel]'    # or: uv pip install 'canary-cage[otel]'
+```
+
+```toml
+# canary.toml
+[beacons.otel]
+enabled = true
+service_name = "canary-cage"
+resource_attributes = { environment = "production", region = "us-west-2" }
+```
+
+### Honeycomb
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://api.honeycomb.io"
+export OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=$HONEYCOMB_API_KEY"
+canary check
+```
+
+### Jaeger (local OTLP collector on 4318)
+
+```bash
+docker run -d --rm -p 4317:4317 -p 4318:4318 -p 16686:16686 \
+  jaegertracing/all-in-one:latest
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+canary check      # http://localhost:16686 → service: canary-cage
+```
+
+Every fire lands as a span named `canary.fire` with the following
+attributes: `canary.id`, `canary.type`, `canary.source`, `canary.detail`,
+`canary.detected_at`, plus `canary.path`, `canary.repo`, and
+`canary.commit` when available. If the OTel extras aren't installed the
+beacon degrades to a clean `.canary-cage/otel.dead` JSON dead-letter
+line instead of a stack trace — same failure model as the webhook and
+chat beacons.
+
 ## Editor integration
 
 A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).

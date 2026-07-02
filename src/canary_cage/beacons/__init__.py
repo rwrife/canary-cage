@@ -4,6 +4,7 @@ from .base import Beacon, BeaconRecord
 from .chat import ChatBeacon, DiscordBeacon, SlackBeacon
 from .file import FileBeacon
 from .log import LogBeacon
+from .otel import OtelBeacon, OtelBeaconMissingDeps
 from .webhook import WebhookBeacon
 
 __all__ = [
@@ -13,6 +14,8 @@ __all__ = [
     "DiscordBeacon",
     "FileBeacon",
     "LogBeacon",
+    "OtelBeacon",
+    "OtelBeaconMissingDeps",
     "SlackBeacon",
     "WebhookBeacon",
 ]
