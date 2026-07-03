@@ -28,6 +28,7 @@ from .beacons import (
     DiscordBeacon,
     FileBeacon,
     LogBeacon,
+    OtelBeacon,
     SlackBeacon,
     WebhookBeacon,
 )
@@ -100,6 +101,14 @@ def beacons_for(root: Path) -> list[Beacon]:
                 backoff=cfg.discord.backoff,
                 headers=dict(cfg.discord.headers),
                 snippet_chars=cfg.discord.snippet_chars,
+            )
+        )
+    if cfg.otel.enabled:
+        sinks.append(
+            OtelBeacon(
+                enabled=True,
+                service_name=cfg.otel.service_name,
+                resource_attributes=dict(cfg.otel.resource_attributes),
             )
         )
     return sinks

@@ -101,6 +101,27 @@ class ChatBeaconConfig(BaseModel):
         return v
 
 
+class OtelConfig(BaseModel):
+    """OpenTelemetry beacon configuration.
+
+    When ``enabled`` is true, ``canary check`` emits one OTel span (with
+    a ``canary.fire`` event) per detected fire. All endpoint / protocol
+    / auth settings live in the standard ``OTEL_EXPORTER_OTLP_*`` env
+    vars — we only own the knobs that don't have a natural OTel env-var.
+    """
+
+    enabled: bool = False
+    service_name: str = "canary-cage"
+    resource_attributes: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("service_name")
+    @classmethod
+    def _service_name_nonempty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("service_name must be a non-empty string")
+        return v
+
+
 class CageConfig(BaseModel):
     """Top-level config document loaded from ``canary.toml``.
 
@@ -116,6 +137,7 @@ class CageConfig(BaseModel):
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
     slack: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
     discord: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
+    otel: OtelConfig = Field(default_factory=OtelConfig)
 
     @field_validator("density")
     @classmethod
@@ -179,7 +201,7 @@ def load_config(root: Path) -> CageConfig:
     # planting knobs in their TOML.
     beacons = data.get("beacons")
     if isinstance(beacons, dict):
-        for key in ("webhook", "slack", "discord"):
+        for key in ("webhook", "slack", "discord", "otel"):
             sub = beacons.get(key)
             if isinstance(sub, dict) and key not in section:
                 section = {**section, key: sub}
@@ -245,6 +267,14 @@ density = 1.0
 # [beacons.discord]
 # url = "https://discord.com/api/webhooks/000/XXX"
 # snippet_chars = 240
+
+# Optional OpenTelemetry beacon. Emits one span + `canary.fire` event
+# per detected fire; endpoint / auth come from the standard
+# OTEL_EXPORTER_OTLP_* env vars. Requires `pip install canary-cage[otel]`.
+# [beacons.otel]
+# enabled = true
+# service_name = "canary-cage"
+# resource_attributes = { environment = "production", region = "us-west-2" }
 """
 
 
