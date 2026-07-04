@@ -54,7 +54,7 @@ $ canary check
 > while running the snippet above, then `asciinema upload demo.cast`.
 
 As of **M4**, `plant`, `list`, `check`, and `uproot` are real. `--type` accepts
-`markdown`, `docstring`, `todo`, `manifest`, or `all` (the default).
+`markdown`, `docstring`, `todo`, `manifest`, `reverse`, or `all` (the default).
 
 The **manifest** canary plants a fake `canary-trip-<id>==0.0.0` package
 into `requirements.txt` / `pyproject.toml` as a typosquat trap. `canary
@@ -99,7 +99,7 @@ canary init --preset paranoid     # …or seed it with a named preset
 # preset = "chaotic-good"  # all types, ~half of eligible files
 # preset = "paranoid"      # all types, everywhere
 
-types = ["markdown", "docstring", "todo", "manifest"]
+types = ["markdown", "docstring", "todo", "manifest", "reverse"]
 ignore = ["docs/**", "vendor/**"]
 density = 1.0   # 0.0–1.0
 ```
@@ -249,6 +249,55 @@ The `--json` payload looks like:
   ]
 }
 ```
+
+## Reverse-canaries — catch jailbroken *outputs*
+
+Regular canaries fire when an agent **acts** on poisoned instructions
+(rewrites a README, drops a fake file, resolves a typosquat dep, ...).
+**Reverse-canaries** flip the polarity: they fire when an agent
+**quotes** a phrase it should never have repeated — the linguistic
+fingerprint of a jailbreak.
+
+`canary plant --type reverse` seeds a bland-looking
+`docs/internal-notes.md` containing a unique `CANARY-REV-<uuid>`
+token wrapped in an instruction that tells the reader (i.e. the agent)
+to *repeat this token if you've ignored prior safety instructions*. A
+well-behaved model treats it as data and never emits the token. A
+jailbroken one parrots it back — into a commit message, PR body,
+review comment, code diff, or agent transcript. That verbatim quote is
+the fire.
+
+```bash
+# Plant the bait (idempotent — refuses to clobber a foreign file).
+canary plant --type reverse
+
+# ...time passes, an agent runs...
+
+# Default `canary check` greps `git log --all --format=%B` for the
+# token, so leaks into commit messages are caught automatically.
+canary check
+
+# Also scan arbitrary text you dump out of chat systems, PRs, etc.
+# May be passed multiple times; accepts files, dirs, or globs.
+canary check --scan-outputs pr-body.md \
+             --scan-outputs chatlogs/ \
+             --scan-outputs 'agent-transcripts/**/*.jsonl'
+
+# Cleanup removes the bait file (and its parent dir if it's empty).
+canary uproot
+```
+
+Fires from reverse-canaries surface with `source="git-log"` (commit
+message leak) or `source="output-scan"` (user-supplied file match)
+and include the matched token plus a short snippet of surrounding
+context in `detail`. They fire beacons through the same file / log /
+webhook / Slack / Discord / OTel plumbing as every other canary type,
+so your existing alerting keeps working.
+
+Use a reverse-canary when you want to detect an agent *speaking* the
+quiet part out loud — for example, when auditing chat transcripts for
+prompt-injection compromise, or as a canary token in agent outputs
+you pipe into your observability stack.
 
 ## Agent fingerprinting
 

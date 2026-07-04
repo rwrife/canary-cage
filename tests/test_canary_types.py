@@ -122,11 +122,13 @@ def test_plant_all_then_list(tmp_path: Path) -> None:
 
     state = load_state(tmp_path)
     types = {c.type for c in state.canaries}
-    assert types == {"markdown", "docstring", "todo"}
+    # Manifest canary needs a manifest file (this fixture has none),
+    # so it silently produces nothing. Every other type should plant.
+    assert types == {"markdown", "docstring", "todo", "reverse"}
 
     list_result = runner.invoke(app, ["list", "--root", str(tmp_path)])
     assert list_result.exit_code == 0
-    for t in ("markdown", "docstring", "todo"):
+    for t in ("markdown", "docstring", "todo", "reverse"):
         assert t in list_result.stdout
 
 
