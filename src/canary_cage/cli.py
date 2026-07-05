@@ -10,7 +10,13 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from .canaries import DocstringCanary, ManifestCanary, MarkdownCanary, TodoCanary
+from .canaries import (
+    DocstringCanary,
+    ManifestCanary,
+    MarkdownCanary,
+    ReverseCanary,
+    TodoCanary,
+)
 from .config import (
     CONFIG_FILE_NAME,
     PRESETS,
@@ -44,7 +50,7 @@ from .honey import (
 )
 from .mcp import serve as serve_mcp
 from .precommit import check_staged, install_hook
-from .scanner import scan
+from .scanner import scan, scan_outputs
 from .state import load_state, save_state, state_path
 
 app = typer.Typer(
@@ -68,7 +74,12 @@ _CANARY_REGISTRY = {
     "docstring": DocstringCanary,
     "todo": TodoCanary,
     "manifest": ManifestCanary,
+    "reverse": ReverseCanary,
 }
+
+# Public alias for external consumers (issue #33). Kept in sync with
+# ``_CANARY_REGISTRY`` — the underscored name predates the public API.
+CANARY_REGISTRY = _CANARY_REGISTRY
 
 
 def _version_callback(value: bool) -> None:
@@ -110,6 +121,15 @@ _ROOT_OPTION = typer.Option(
     file_okay=False,
     dir_okay=True,
     resolve_path=True,
+)
+
+_SCAN_OUTPUTS_OPTION = typer.Option(
+    None,
+    "--scan-outputs",
+    help=(
+        "Also grep this path/glob for reverse-canary tokens. "
+        "May be given multiple times."
+    ),
 )
 
 
@@ -382,6 +402,7 @@ def check(
     json_out: bool = typer.Option(
         False, "--json", help="Emit machine-readable JSON instead of a table."
     ),
+    scan_outputs_paths: list[str] | None = _SCAN_OUTPUTS_OPTION,
 ) -> None:
     """Scan for evidence a canary fired and fire beacons for each hit."""
 
@@ -389,6 +410,8 @@ def check(
 
     root = _resolve_root(root)
     fires = scan(root)
+    if scan_outputs_paths:
+        fires.extend(scan_outputs(root, scan_outputs_paths))
 
     # Attribute each fire to a likely agent (additive — never breaks existing
     # consumers; `attributed_to` is just a new optional field).

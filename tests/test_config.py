@@ -21,7 +21,7 @@ runner = CliRunner()
 
 def test_defaults_when_no_config(tmp_path: Path) -> None:
     cfg = load_config(tmp_path)
-    assert cfg.types == ["markdown", "docstring", "todo", "manifest"]
+    assert cfg.types == ["markdown", "docstring", "todo", "manifest", "reverse"]
     assert cfg.density == 1.0
     assert cfg.ignore == []
     assert cfg.preset is None
@@ -44,7 +44,7 @@ def test_preset_alone_seeds_defaults(tmp_path: Path) -> None:
     )
     cfg = load_config(tmp_path)
     assert cfg.preset == "chaotic-good"
-    assert set(cfg.types) == {"markdown", "docstring", "todo", "manifest"}
+    assert set(cfg.types) == {"markdown", "docstring", "todo", "manifest", "reverse"}
     assert cfg.density == 0.5
 
 

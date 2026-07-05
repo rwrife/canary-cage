@@ -33,6 +33,7 @@ from .beacons import (
     WebhookBeacon,
 )
 from .beacons.file import FIRED_DIR_NAME
+from .canaries.reverse import token_for
 from .config import load_config
 from .state import STATE_DIR_NAME, PlantedCanary, load_state
 
@@ -43,6 +44,7 @@ _SENTINELS = {
     "docstring": "canary-cage:py:BEGIN:",
     "todo": "canary-cage:todo:BEGIN:",
     "manifest": "canary-cage:manifest:BEGIN:",
+    "reverse": "canary-cage:reverse:BEGIN:",
 }
 
 # Lockfiles to scan for typosquat-trap package mentions. The presence of
@@ -210,6 +212,29 @@ def _git_log_grep(root: Path, needle: str) -> str | None:
     return sha[0] if sha else None
 
 
+def _git_log_messages(root: Path) -> str | None:
+    """Return the full concatenation of all commit *messages* (``%B``).
+
+    Distinct from :func:`_git_log_grep`, which searches diffs for a
+    needle. Reverse-canary tokens most commonly leak into commit
+    *messages* (an agent narrating its work), so we grep the message
+    body directly.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "log", "--all", "--format=%H%n%B%n---"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 def _check_git_history(
     root: Path, canaries: Iterable[PlantedCanary]
 ) -> list[BeaconRecord]:
@@ -217,6 +242,12 @@ def _check_git_history(
     if not (root / ".git").exists():
         return out
     for canary in canaries:
+        # Reverse-canaries are covered by ``_check_reverse_git_log`` which
+        # greps commit *message bodies* for the token — running a
+        # ``-S<marker>`` diff grep here would just re-flag the commit that
+        # originally planted the bait file. Skip.
+        if canary.type == "reverse":
+            continue
         # Grep specifically for the marker token; commits that *introduced*
         # the canary will also match, but the canary id leaking elsewhere is
         # exactly what we want to know about — surfacing both is fine for M4
@@ -272,6 +303,225 @@ def _check_lockfile_mentions(
     return out
 
 
+def _reverse_canaries(
+    canaries: Iterable[PlantedCanary],
+) -> list[tuple[PlantedCanary, str]]:
+    """Return ``(canary, token)`` pairs for every reverse canary with a token."""
+    pairs: list[tuple[PlantedCanary, str]] = []
+    for c in canaries:
+        if c.type != "reverse":
+            continue
+        token = token_for(c)
+        if token:
+            pairs.append((c, token))
+    return pairs
+
+
+def _snippet(text: str, needle: str, radius: int = 60) -> str:
+    """Return a short context snippet around ``needle`` in ``text``."""
+    idx = text.find(needle)
+    if idx == -1:
+        return needle
+    start = max(0, idx - radius)
+    end = min(len(text), idx + len(needle) + radius)
+    snippet = text[start:end].replace("\n", " ").strip()
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    return f"{prefix}{snippet}{suffix}"
+
+
+def _check_reverse_git_log(
+    root: Path, canaries: Iterable[PlantedCanary]
+) -> list[BeaconRecord]:
+    """Grep every commit message for reverse-canary tokens.
+
+    Fires when a ``CANARY-REV-<hex>`` token planted in a bait file
+    turns up in a commit *message* body. Only messages are scanned
+    here — leakage into diffs is out-of-scope for this pass (a naive
+    ``-S<token>`` would match the introducing commit that planted the
+    bait file itself, which is noise).
+    """
+    pairs = _reverse_canaries(canaries)
+    if not pairs:
+        return []
+    if not (root / ".git").exists():
+        return []
+    messages = _git_log_messages(root)
+    if not messages:
+        return []
+    out: list[BeaconRecord] = []
+    for canary, token in pairs:
+        idx = messages.find(token)
+        if idx == -1:
+            continue
+        # Walk back to the nearest %H line before the match to figure
+        # out which commit leaked the token.
+        head = messages[:idx]
+        sha = ""
+        for line in reversed(head.splitlines()):
+            line = line.strip()
+            if len(line) == 40 and all(ch in "0123456789abcdef" for ch in line):
+                sha = line
+                break
+        detail = (
+            f"reverse-canary token {token} appears in commit message"
+            + (f" {sha[:12]}" if sha else "")
+        )
+        out.append(
+            BeaconRecord(
+                canary_id=canary.id,
+                canary_type=canary.type,
+                source="git-log",
+                detail=detail,
+            )
+        )
+    return out
+
+
+# File extensions we're willing to scan for reverse-canary tokens.
+# Deliberately conservative — grepping every binary in a repo is a
+# footgun. Users can widen this via ``canary check --scan-outputs`` on
+# an explicit glob.
+_SCAN_TEXT_EXTS: frozenset[str] = frozenset(
+    {
+        ".md",
+        ".txt",
+        ".log",
+        ".json",
+        ".jsonl",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".rs",
+        ".go",
+        ".java",
+        ".sh",
+        ".rb",
+        ".diff",
+        ".patch",
+    }
+)
+
+_SCAN_MAX_BYTES = 2 * 1024 * 1024  # 2 MB per file cap; skip larger.
+
+
+def _iter_scan_targets(root: Path, patterns: Iterable[str]) -> list[Path]:
+    """Expand user-supplied paths/globs into a de-duplicated file list.
+
+    Each pattern can be an absolute path, a path relative to ``root``,
+    or a glob (``docs/**/*.md``). Directories are recursed into and
+    filtered by :data:`_SCAN_TEXT_EXTS`; explicit file paths are always
+    included regardless of extension so power users can point at, e.g.,
+    an ``agent-transcript.dat`` dump.
+    """
+    seen: set[Path] = set()
+    out: list[Path] = []
+
+    def _add(p: Path, *, extension_check: bool) -> None:
+        try:
+            resolved = p.resolve()
+        except OSError:
+            return
+        if resolved in seen or not resolved.is_file():
+            return
+        if extension_check and resolved.suffix.lower() not in _SCAN_TEXT_EXTS:
+            return
+        seen.add(resolved)
+        out.append(resolved)
+
+    for pattern in patterns:
+        raw = str(pattern)
+        candidate = Path(raw)
+        if not candidate.is_absolute():
+            candidate = (root / raw).resolve()
+        # Explicit file path — include unconditionally.
+        if candidate.exists() and candidate.is_file():
+            _add(candidate, extension_check=False)
+            continue
+        if candidate.exists() and candidate.is_dir():
+            for f in sorted(candidate.rglob("*")):
+                _add(f, extension_check=True)
+            continue
+        # Fall back to glob semantics rooted at ``root``.
+        # Support absolute globs by anchoring at filesystem root.
+        try:
+            if Path(raw).is_absolute():
+                # ``Path.glob`` doesn't accept absolute patterns — split.
+                anchor = Path(raw).anchor or "/"
+                rel = raw[len(anchor):]
+                matches = Path(anchor).glob(rel)
+            else:
+                matches = root.glob(raw)
+        except (NotImplementedError, ValueError):
+            continue
+        for match in sorted(matches):
+            if match.is_file():
+                _add(match, extension_check=True)
+            elif match.is_dir():
+                for f in sorted(match.rglob("*")):
+                    _add(f, extension_check=True)
+    return out
+
+
+def scan_outputs(
+    root: Path,
+    patterns: Iterable[str],
+    *,
+    beacons: Iterable[Beacon] | None = None,
+) -> list[BeaconRecord]:
+    """Scan arbitrary text files/globs for reverse-canary tokens.
+
+    Complements :func:`scan` — the latter looks at working-tree state,
+    stray-file artifacts, git history, and lockfiles; this one grepss
+    caller-supplied *outputs* (agent transcripts, PR body dumps, chat
+    logs) for the linguistic fingerprint of a jailbreak.
+    """
+    sinks = list(beacons) if beacons is not None else beacons_for(root)
+    state = load_state(root)
+    pairs = _reverse_canaries(c for c in state.canaries if c.is_armed())
+    if not pairs:
+        return []
+    targets = _iter_scan_targets(root, patterns)
+    fires: list[BeaconRecord] = []
+    for target in targets:
+        try:
+            if target.stat().st_size > _SCAN_MAX_BYTES:
+                continue
+            text = target.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for canary, token in pairs:
+            if token not in text:
+                continue
+            try:
+                rel = str(target.relative_to(root))
+            except ValueError:
+                rel = str(target)
+            fires.append(
+                BeaconRecord(
+                    canary_id=canary.id,
+                    canary_type=canary.type,
+                    source="output-scan",
+                    detail=(
+                        f"reverse-canary token {token} found in {rel}: "
+                        + _snippet(text, token)
+                    ),
+                    path=rel,
+                )
+            )
+    for rec in fires:
+        for sink in sinks:
+            sink.fire(root, rec)
+    return fires
+
+
 def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconRecord]:
     """Run all signal checks and fire beacons for each detected event."""
     sinks = list(beacons) if beacons is not None else beacons_for(root)
@@ -290,6 +540,7 @@ def scan(root: Path, beacons: Iterable[Beacon] | None = None) -> list[BeaconReco
     fires.extend(_check_stray_fire_files(root, armed))
     fires.extend(_check_git_history(root, armed))
     fires.extend(_check_lockfile_mentions(root, armed))
+    fires.extend(_check_reverse_git_log(root, armed))
 
     for rec in fires:
         for sink in sinks:

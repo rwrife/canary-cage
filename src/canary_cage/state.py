@@ -18,7 +18,7 @@ STATE_DIR_NAME = ".canary-cage"
 STATE_FILE_NAME = "state.json"
 SCHEMA_VERSION = 1
 
-CanaryType = Literal["markdown", "docstring", "todo", "manifest"]
+CanaryType = Literal["markdown", "docstring", "todo", "manifest", "reverse"]
 HoneyKind = Literal["issue", "pr"]
 
 
@@ -37,6 +37,11 @@ class PlantedCanary(BaseModel):
     # Time-bomb: when set, the canary is dormant until ``armed_at`` has
     # passed. ``None`` means "always armed" — the historical behaviour.
     armed_at: datetime | None = None
+    # Free-form per-canary payload. Currently used by ``reverse`` canaries
+    # to store the exact ``CANARY-REV-<uuid>`` token scanners look for so
+    # detection doesn't have to re-read the bait file. Older state files
+    # (pre-issue-33) won't have this and pydantic defaults it to None.
+    payload: str | None = None
 
     def is_armed(self, now: datetime | None = None) -> bool:
         """Return True if the canary is currently armed (live)."""
