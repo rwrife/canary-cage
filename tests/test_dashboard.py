@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -377,5 +378,9 @@ def test_cli_dashboard_once_populated(tmp_path: Path) -> None:
 def test_cli_dashboard_help_lists_flags() -> None:
     result = runner.invoke(app, ["dashboard", "--help"])
     assert result.exit_code == 0
+    # Rich/Typer help wraps and colorizes output, so strip ANSI escape
+    # sequences and normalize whitespace before asserting substrings.
+    ansi_re = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+    cleaned = re.sub(r"\s+", " ", ansi_re.sub("", result.stdout))
     for flag in ("--days", "--refresh", "--once"):
-        assert flag in result.stdout
+        assert flag in cleaned
