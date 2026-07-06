@@ -25,6 +25,7 @@ from .config import (
     load_config,
     write_default_config,
 )
+from .dashboard import run_dashboard
 from .diff import (
     VERDICT_FIRED,
     VERDICT_INTACT,
@@ -786,6 +787,44 @@ def mcp(
     root = _resolve_root(root)
     try:
         serve_mcp(root)
+    except KeyboardInterrupt:
+        raise typer.Exit(code=0) from None
+
+
+@app.command()
+def dashboard(
+    root: Path | None = _ROOT_OPTION,
+    days: int = typer.Option(
+        7,
+        "--days",
+        "-d",
+        min=1,
+        help="How many trailing UTC days to include in the heatmap.",
+    ),
+    refresh: float = typer.Option(
+        2.0,
+        "--refresh",
+        "-r",
+        min=0.1,
+        help="Seconds between live-refresh frames (ignored with --once).",
+    ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Render a single frame and exit (screenshots, CI, tests).",
+    ),
+) -> None:
+    """🐦 Live TUI dashboard of planted / fired / silent canaries (issue #34).
+
+    Reads every registered beacon reader (file + log beacons out of the box)
+    and renders a heatmap, a recent-fires table, and a summary tile. Pass
+    ``--once`` for a static single-frame render that plays well with CI and
+    ``rich.console.Console.capture()``.
+    """
+
+    root = _resolve_root(root)
+    try:
+        run_dashboard(root, days=days, refresh=refresh, once=once, console=console)
     except KeyboardInterrupt:
         raise typer.Exit(code=0) from None
 

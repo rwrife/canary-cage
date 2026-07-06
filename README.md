@@ -440,6 +440,46 @@ beacon degrades to a clean `.canary-cage/otel.dead` JSON dead-letter
 line instead of a stack trace — same failure model as the webhook and
 chat beacons.
 
+## Dashboard
+
+Ask any live cage “am I being probed?” without wiring up a webhook. The
+`canary dashboard` command is a Rich-powered TUI that reads every registered
+beacon reader (`file` and `log` out of the box), tallies fires per canary
+type over the trailing window, and shows recent activity plus planted /
+fired / silent counts.
+
+```bash
+canary dashboard              # live-refresh every 2s over the last 7 days
+canary dashboard --days 14    # widen the heatmap
+canary dashboard --refresh 5  # slower refresh for low-signal repos
+canary dashboard --once       # single frame, exits cleanly (CI / screenshots)
+```
+
+What it looks like when the cage is chirping:
+
+```
+╭─ 🐤 canary-cage dashboard ─ .canary-cage @ /repo  |  window: 7d ─────────────╮
+╰──────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ 🔥 fires per canary type ─ last 7 day(s) ────────╮╭─ 📊 summary ──────────────╮
+│            06-29 06-30 07-01 07-02 07-03 07-04 07-05 Σ ││          planted  4         │
+│  markdown    ·     ·     ·     1     ·     ·     2   3 ││            fired  2         │
+│ docstring    ·     ·     ·     ·     1     ·     ·   1 ││           silent  2         │
+│      todo    ·     ·     ·     ·     ·     1     ·   1 ││     total fires  5         │
+│  manifest    ·     ·     ·     ·     ·     ·     1   1 ││ beacons w/ data  2         │
+╰──────────────────────────────────────────────────────────╯╰──────────────────────────╯
+╭─ 🕒 recent fires ─────────────────────────────────────────────────────╮
+│ id       type       when       source        agent  detail                       │
+│ md-abc1  markdown   0s ago     working-tree  ?      sentinel missing              │
+│ mn-9922  manifest   2h ago     working-tree  ?      docs/internal-notes.md drift  │
+│ td-4411  todo       5h ago     git-history   ?      curl-* url leaked in commits  │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+Empty cages get a friendly “nothing yet” panel instead of a wall of
+zeros. Third-party beacons can plug in with
+``canary_cage.dashboard.register_beacon_reader(name, reader)`` — the reader
+just needs to return a list of ``BeaconRecord`` for a given cage root.
+
 ## Editor integration
 
 A minimal VS Code extension lives under [`vscode-extension/`](./vscode-extension/).
