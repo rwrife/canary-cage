@@ -43,6 +43,15 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .bait_tools import (
+    BaitTool,
+    list_bait_tools,
+    record_bait_hit,
+)
+from .bait_tools import (
+    mcp_input_schema as bait_input_schema,
+)
+from .config import load_config
 from .state import load_state, state_dir
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -269,8 +278,45 @@ def _err(req_id: Any, code: int, message: str) -> dict[str, Any]:
     }
 
 
-def _tool_descriptors() -> list[dict[str, Any]]:
+def _bait_tools_enabled(root: Path) -> bool:
+    """Read ``[mcp] bait_tools`` from ``canary.toml``; default False."""
+    try:
+        cfg = load_config(root)
+    except (ValueError, OSError):
+        return False
+    return bool(cfg.mcp.bait_tools)
+
+
+def _bait_tool_descriptors(root: Path) -> list[dict[str, Any]]:
+    if not _bait_tools_enabled(root):
+        return []
     return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "inputSchema": bait_input_schema(),
+        }
+        for tool in list_bait_tools(root)
+    ]
+
+
+def _dispatch_bait_tool(
+    root: Path, tool: BaitTool, args: dict[str, Any]
+) -> dict[str, Any]:
+    """Record a bait-tool invocation and return its decoy payload.
+
+    Splits the raw ``args`` payload into ``call_args`` (what the agent
+    thinks it's passing to the tool) and ``caller`` (optional metadata)
+    so the beacon record captures both.
+    """
+    call_args = args.get("args") if isinstance(args.get("args"), dict) else args
+    caller_hint = args.get("caller") if isinstance(args.get("caller"), str) else None
+    record_bait_hit(root, tool, args=call_args, caller_hint=caller_hint)
+    return dict(tool.decoy_return)
+
+
+def _tool_descriptors(root: Path | None = None) -> list[dict[str, Any]]:
+    core = [
         {
             "name": name,
             "description": spec["description"],
@@ -278,6 +324,9 @@ def _tool_descriptors() -> list[dict[str, Any]]:
         }
         for name, spec in TOOLS.items()
     ]
+    if root is not None:
+        core.extend(_bait_tool_descriptors(root))
+    return core
 
 
 def handle_request(root: Path, request: dict[str, Any]) -> dict[str, Any] | None:
@@ -310,35 +359,55 @@ def handle_request(root: Path, request: dict[str, Any]) -> dict[str, Any] | None
         return (
             None
             if is_notification
-            else _ok(req_id, {"tools": _tool_descriptors()})
+            else _ok(req_id, {"tools": _tool_descriptors(root)})
         )
 
     if method == "tools/call":
         name = params.get("name")
         args = params.get("arguments") or {}
         spec = TOOLS.get(name)
-        if spec is None:
-            payload = {
-                "content": [
-                    {"type": "text", "text": f"unknown tool: {name!r}"}
-                ],
-                "isError": True,
-            }
+        if spec is not None:
+            try:
+                data = spec["handler"](root, args)
+                payload = {
+                    "content": [
+                        {"type": "text", "text": json.dumps(data, indent=2, sort_keys=True)}
+                    ],
+                    "structuredContent": data,
+                    "isError": False,
+                }
+            except (ValueError, OSError) as exc:
+                payload = {
+                    "content": [{"type": "text", "text": str(exc)}],
+                    "isError": True,
+                }
             return None if is_notification else _ok(req_id, payload)
-        try:
-            data = spec["handler"](root, args)
-            payload = {
-                "content": [
-                    {"type": "text", "text": json.dumps(data, indent=2, sort_keys=True)}
-                ],
-                "structuredContent": data,
-                "isError": False,
-            }
-        except (ValueError, OSError) as exc:
-            payload = {
-                "content": [{"type": "text", "text": str(exc)}],
-                "isError": True,
-            }
+        # Not a core tool — try bait-tool dispatch when the honeypot is on.
+        if _bait_tools_enabled(root):
+            bait_by_name = {t.name: t for t in list_bait_tools(root)}
+            bait = bait_by_name.get(name)
+            if bait is not None:
+                try:
+                    data = _dispatch_bait_tool(root, bait, args)
+                    payload = {
+                        "content": [
+                            {"type": "text", "text": json.dumps(data, indent=2, sort_keys=True)}
+                        ],
+                        "structuredContent": data,
+                        "isError": False,
+                    }
+                except (ValueError, OSError) as exc:
+                    payload = {
+                        "content": [{"type": "text", "text": str(exc)}],
+                        "isError": True,
+                    }
+                return None if is_notification else _ok(req_id, payload)
+        payload = {
+            "content": [
+                {"type": "text", "text": f"unknown tool: {name!r}"}
+            ],
+            "isError": True,
+        }
         return None if is_notification else _ok(req_id, payload)
 
     if is_notification:
