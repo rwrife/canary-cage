@@ -10,6 +10,12 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from .bait_tools import (
+    add_bait_tool,
+    bait_tools_path,
+    list_bait_tools,
+    remove_bait_tool,
+)
 from .canaries import (
     DocstringCanary,
     ManifestCanary,
@@ -67,6 +73,13 @@ honey_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(honey_app, name="honey")
+
+bait_app = typer.Typer(
+    name="bait-tool",
+    help="🪝 Manage MCP bait tools — the tool-hijacking honeypot (issue #35).",
+    no_args_is_help=True,
+)
+app.add_typer(bait_app, name="bait-tool")
 
 console = Console()
 
@@ -789,6 +802,93 @@ def mcp(
         serve_mcp(root)
     except KeyboardInterrupt:
         raise typer.Exit(code=0) from None
+
+
+@bait_app.command("list")
+def bait_list_cmd(
+    root: Path | None = _ROOT_OPTION,
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List every registered bait tool (built-ins + user-defined)."""
+
+    import json as _json
+
+    root = _resolve_root(root)
+    tools = list_bait_tools(root)
+    if json_out:
+        console.print_json(_json.dumps([t.to_dict() for t in tools]))
+        return
+    if not tools:
+        console.print("[yellow]no bait tools registered.[/yellow]")
+        return
+    table = Table(title=f"🪝 bait tools ({len(tools)})")
+    table.add_column("name", style="cyan", no_wrap=True)
+    table.add_column("description", style="green")
+    for t in tools:
+        table.add_row(t.name, t.description)
+    console.print(table)
+    console.print(
+        f"  user-defined bait tools stored at [dim]{bait_tools_path(root)}[/dim]"
+    )
+
+
+@bait_app.command("add")
+def bait_add_cmd(
+    name: str = typer.Option(..., "--name", help="Tool name (letters, digits, _, -, .)."),
+    description: str = typer.Option(..., "--description", help="What the tool 'does'."),
+    decoy_return: str | None = typer.Option(
+        None,
+        "--decoy-return",
+        help=(
+            "JSON object the bait tool returns to the calling agent. "
+            "Defaults to '{}'."
+        ),
+    ),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Register a user-defined bait tool."""
+
+    import json as _json
+
+    root = _resolve_root(root)
+    decoy: dict[str, object] = {}
+    if decoy_return is not None:
+        try:
+            parsed = _json.loads(decoy_return)
+        except _json.JSONDecodeError as exc:
+            console.print(f"[red]bad --decoy-return JSON: {exc}[/red]")
+            raise typer.Exit(code=2) from exc
+        if not isinstance(parsed, dict):
+            console.print("[red]--decoy-return must decode to a JSON object.[/red]")
+            raise typer.Exit(code=2)
+        decoy = parsed
+    try:
+        tool = add_bait_tool(root, name=name, description=description, decoy_return=decoy)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    console.print(
+        f"🪝 registered bait tool [cyan]{tool.name}[/cyan] → {bait_tools_path(root)}"
+    )
+
+
+@bait_app.command("remove")
+def bait_remove_cmd(
+    name: str = typer.Option(..., "--name", help="Bait-tool name to remove."),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Remove a user-defined bait tool. Built-ins are immutable."""
+
+    root = _resolve_root(root)
+    try:
+        removed = remove_bait_tool(root, name)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    if not removed:
+        console.print(f"[yellow]no user-defined bait tool named {name!r}.[/yellow]")
+        raise typer.Exit(code=1)
+    console.print(f"🧹 removed bait tool [cyan]{name}[/cyan].")
 
 
 @app.command()

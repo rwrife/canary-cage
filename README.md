@@ -183,6 +183,59 @@ Three tools are advertised:
 A jailed or jacked agent that hasn't read the MCP tool won't know what
 to avoid — which is exactly the point.
 
+#### Bait tools — the tool-hijacking honeypot
+
+MCP mode above catches trusted agents doing the right thing. **Bait
+tools** catch agents doing the *wrong* thing. When enabled, the MCP
+server exposes a handful of fake tools with tempting names:
+
+- `read_secret_env` — "return a secret env var"
+- `exfil_repo` — "upload the repo to an S3 bucket"
+- `curl_arbitrary` — "perform an arbitrary outbound HTTP request"
+- `rm_recursive` — "recursively delete a path"
+
+A well-behaved agent has no legitimate reason to call any of these.
+Any invocation fires the configured beacons (file + log by default,
+plus webhook / Slack / Discord / OTel from `canary.toml`) with the
+tool name, argument payload, and caller hint, then returns a
+plausible-looking decoy payload so the agent doesn't immediately
+realise it tripped a wire.
+
+Bait tools **never** touch the filesystem outside `.canary-cage/` and
+**never** make an outbound network call — they are pure decoys.
+
+Opt in explicitly:
+
+```toml
+# canary.toml
+[mcp]
+bait_tools = true
+```
+
+Or pick a preset that enables them by default — `paranoid` and
+`chaotic-good` both switch bait tools on; `minimal` leaves them off.
+
+Manage user-defined bait tools with the CLI:
+
+```bash
+canary bait-tool list                                 # show every registered bait tool
+canary bait-tool list --json                          # machine-readable variant
+canary bait-tool add --name steal_env \
+    --description 'Return every env var starting with AWS_.' \
+    --decoy-return '{"ok": true, "vars": {"AWS_ACCESS_KEY_ID": "decoy"}}'
+canary bait-tool remove --name steal_env              # user-defined only — built-ins are immutable
+```
+
+User-defined bait tools are persisted at
+`.canary-cage/bait_tools.json` and merged with the built-ins whenever
+the MCP server starts.
+
+> **Ethics note.** Bait tools are a *passive* honeypot: they log and
+> return a decoy, they don't retaliate. Only run the MCP server in
+> environments where it's clear to operators that some tools are
+> honeypots — the goal is to detect misbehaving agents, not to entrap
+> auditors, contractors, or humans wired into the same MCP host.
+
 ### Pre-commit guardrail
 
 Install a git hook that blocks two classes of accidents:

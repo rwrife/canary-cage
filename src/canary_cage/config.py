@@ -122,6 +122,18 @@ class OtelConfig(BaseModel):
         return v
 
 
+class MCPConfig(BaseModel):
+    """MCP server behaviour (issue #35).
+
+    ``bait_tools`` toggles the tool-hijacking honeypot: when enabled the
+    MCP server exposes fake tools with tempting names (``read_secret_env``,
+    ``exfil_repo``, …). Any call to one fires the configured beacons.
+    Off by default — opt in explicitly or via the ``paranoid`` /
+    ``chaotic-good`` presets.
+    """
+
+    bait_tools: bool = False
+
 class CageConfig(BaseModel):
     """Top-level config document loaded from ``canary.toml``.
 
@@ -138,6 +150,7 @@ class CageConfig(BaseModel):
     slack: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
     discord: ChatBeaconConfig = Field(default_factory=ChatBeaconConfig)
     otel: OtelConfig = Field(default_factory=OtelConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
     @field_validator("density")
     @classmethod
@@ -160,14 +173,17 @@ PRESETS: dict[PresetName, dict[str, object]] = {
     "minimal": {
         "types": ["markdown"],
         "density": 0.25,
+        "mcp": {"bait_tools": False},
     },
     "paranoid": {
         "types": list(ALL_TYPES),
         "density": 1.0,
+        "mcp": {"bait_tools": True},
     },
     "chaotic-good": {
         "types": list(ALL_TYPES),
         "density": 0.5,
+        "mcp": {"bait_tools": True},
     },
 }
 
@@ -205,6 +221,11 @@ def load_config(root: Path) -> CageConfig:
             sub = beacons.get(key)
             if isinstance(sub, dict) and key not in section:
                 section = {**section, key: sub}
+    # Also surface a top-level [mcp] table so the MCP knobs live in
+    # their own visually-separate section of the TOML.
+    mcp_section = data.get("mcp")
+    if isinstance(mcp_section, dict) and "mcp" not in section:
+        section = {**section, "mcp": mcp_section}
     preset = section.get("preset")
     if preset is not None:
         if preset not in PRESETS:
@@ -275,6 +296,14 @@ density = 1.0
 # enabled = true
 # service_name = "canary-cage"
 # resource_attributes = { environment = "production", region = "us-west-2" }
+
+# MCP server behaviour. When `bait_tools = true`, `canary mcp` exposes
+# a set of fake tools (read_secret_env, exfil_repo, curl_arbitrary,
+# rm_recursive) as a tool-hijacking honeypot. Any invocation fires the
+# configured beacons. Enabled by the `paranoid` and `chaotic-good`
+# presets; off by default.
+# [mcp]
+# bait_tools = true
 """
 
 
