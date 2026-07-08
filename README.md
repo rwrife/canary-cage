@@ -107,6 +107,61 @@ density = 1.0   # 0.0–1.0
 Explicit fields always win over preset defaults. `.canary-cage/**` and
 `.git/**` are always ignored.
 
+### Use in GitHub Actions
+
+canary-cage ships a composite GitHub Action that runs `canary check` on
+every PR, fails the build when a canary fires, uploads the fired-beacon
+artifacts, and (optionally) leaves an idempotent PR comment describing
+the incident. Drop this into `.github/workflows/canary-check.yml`:
+
+```yaml
+name: canary-check
+on:
+  pull_request:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # only needed when comment-on-pr: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # gives `canary check` the git history it needs
+      - uses: rwrife/canary-cage@v1
+        with:
+          config-path: canary.toml     # default
+          fail-on-fire: "true"         # default
+          comment-on-pr: "true"        # opt-in PR comment on fire
+          # since: ${{ github.event.pull_request.base.sha }}  # reserved for future diff-scoped runs
+```
+
+**Inputs**
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `config-path` | `canary.toml` | Path to your canary config, relative to the working directory. |
+| `fail-on-fire` | `true` | Exit non-zero if any canary fires. Set to `false` to surface findings without breaking the build. |
+| `since` | *(empty)* | Git ref forwarded to future diff-scoped runs; currently informational. |
+| `comment-on-pr` | `false` | On fire, post/update a PR comment with a summary table. Requires `pull-requests: write`. |
+| `working-directory` | `$GITHUB_WORKSPACE` | Where to invoke `canary` from. Handy for monorepos. |
+| `canary-cage-version` | `source` | Pip spec for `canary-cage` (e.g. `canary-cage==0.1.0`). `source` installs the action's own checkout — the default for the in-repo self-test. |
+| `python-version` | `3.12` | Passed to `actions/setup-python`. |
+
+**Outputs**
+
+| Output | Meaning |
+| --- | --- |
+| `fired-count` | Number of fires detected (0 when clean). |
+| `fired-ids` | JSON array of fired canary ids. |
+| `report-path` | Absolute path to the JSON report written by `canary check --json`. |
+
+When a canary fires the action also writes the report + fired-beacon
+directory to the `canary-cage-fires` workflow artifact and appends a
+markdown table to `$GITHUB_STEP_SUMMARY`, so the run page tells the
+full story even without a PR comment.
+
 ### Webhook beacon (M6)
 
 Add a `[beacons.webhook]` table to `canary.toml` to POST every fire as
