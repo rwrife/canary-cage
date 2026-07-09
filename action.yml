@@ -55,6 +55,17 @@ outputs:
   report-path:
     description: "Path to the JSON report written by `canary check --json`."
     value: ${{ steps.canary.outputs.report-path }}
+  comment-path:
+    description: >-
+      Path to the rendered markdown comment body (same content that is
+      appended to `$GITHUB_STEP_SUMMARY` and posted to the PR when
+      `comment-on-pr` is enabled).
+    value: ${{ steps.canary.outputs.comment-path }}
+  fired-dir:
+    description: >-
+      Directory containing raw beacon payloads for fired canaries
+      (uploaded as the `canary-cage-fires` artifact when any fire).
+    value: ${{ steps.canary.outputs.fired-dir }}
 
 runs:
   using: "composite"
