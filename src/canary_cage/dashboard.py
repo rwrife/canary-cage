@@ -17,6 +17,7 @@ that persist locally today: :data:`file_beacon_reader` and
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable
@@ -559,7 +560,16 @@ def run_dashboard(
     from rich.console import Console  # imported here to keep module import cheap
     from rich.live import Live
 
-    console = console or Console()
+    if console is None:
+        # Honor COLUMNS env explicitly: Rich's auto-detection ignores it in
+        # non-TTY contexts (e.g. Typer's CliRunner), which truncates columns
+        # like the canary id with ellipses.
+        columns_env = os.environ.get("COLUMNS")
+        try:
+            width = int(columns_env) if columns_env else None
+        except ValueError:
+            width = None
+        console = Console(width=width) if width else Console()
     now_provider = now_provider or (lambda: datetime.now(UTC))
 
     frames = 0

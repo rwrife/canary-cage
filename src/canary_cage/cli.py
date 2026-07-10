@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import os
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -923,8 +924,16 @@ def dashboard(
     """
 
     root = _resolve_root(root)
+    # Honor COLUMNS env explicitly so Typer's CliRunner (non-TTY) can widen the
+    # dashboard for tests/CI; Rich's auto-detect ignores COLUMNS off-TTY.
+    columns_env = os.environ.get("COLUMNS")
     try:
-        run_dashboard(root, days=days, refresh=refresh, once=once, console=console)
+        _cols = int(columns_env) if columns_env else None
+    except ValueError:
+        _cols = None
+    dash_console = Console(width=_cols) if _cols else console
+    try:
+        run_dashboard(root, days=days, refresh=refresh, once=once, console=dash_console)
     except KeyboardInterrupt:
         raise typer.Exit(code=0) from None
 
