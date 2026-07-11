@@ -36,7 +36,12 @@ from canary_cage.state import CageState, PlantedCanary, save_state
 runner = CliRunner()
 
 
-NOW = datetime(2026, 7, 5, 12, 0, tzinfo=UTC)
+# Anchor NOW near wall-clock time so the dashboard CLI test (which uses the
+# real datetime.now() for its days-window cutoff) always sees the planted
+# fires inside the window. A previously-hardcoded fixed date silently rotted
+# out of the window as wall-clock advanced past it, turning
+# ``test_cli_dashboard_once_populated`` into a time-bomb test.
+NOW = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
 
 
 def _plant(root: Path, records: list[BeaconRecord], *, use_log: bool = True) -> None:
