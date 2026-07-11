@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-import os
 import typer
 from rich.console import Console
 from rich.table import Table
