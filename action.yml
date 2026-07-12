@@ -1,0 +1,157 @@
+name: "canary-cage check"
+description: >-
+  Run `canary check` against the current checkout, fail the build when
+  a canary has fired, and (optionally) leave a PR comment + workflow
+  summary describing the incident.
+author: "rwrife"
+branding:
+  icon: "shield"
+  color: "yellow"
+
+inputs:
+  config-path:
+    description: "Path to canary.toml relative to the working directory."
+    required: false
+    default: "canary.toml"
+  fail-on-fire:
+    description: "Exit non-zero when at least one canary fires."
+    required: false
+    default: "true"
+  since:
+    description: >-
+      Git ref to scan diffs from. Defaults to the pull-request base SHA on
+      pull_request events, otherwise unset. Passed through to
+      `canary diff --since` when set (via CANARY_CAGE_SINCE for future
+      wiring); does not currently constrain `canary check`.
+    required: false
+    default: ""
+  comment-on-pr:
+    description: "Post/update a PR comment when at least one canary fires."
+    required: false
+    default: "false"
+  working-directory:
+    description: "Directory to run canary from (defaults to $GITHUB_WORKSPACE)."
+    required: false
+    default: ""
+  canary-cage-version:
+    description: >-
+      Version spec passed to `pip install`. Use "source" to install the
+      current checkout (default when running inside canary-cage itself),
+      or e.g. "canary-cage==0.1.0" once published.
+    required: false
+    default: "source"
+  python-version:
+    description: "Python version to set up before installing canary-cage."
+    required: false
+    default: "3.12"
+
+outputs:
+  fired-count:
+    description: "Number of fired canaries (0 when clean)."
+    value: ${{ steps.canary.outputs.fired-count }}
+  fired-ids:
+    description: "JSON array of fired canary ids."
+    value: ${{ steps.canary.outputs.fired-ids }}
+  report-path:
+    description: "Path to the JSON report written by `canary check --json`."
+    value: ${{ steps.canary.outputs.report-path }}
+  comment-path:
+    description: >-
+      Path to the rendered markdown comment body (same content that is
+      appended to `$GITHUB_STEP_SUMMARY` and posted to the PR when
+      `comment-on-pr` is enabled).
+    value: ${{ steps.canary.outputs.comment-path }}
+  fired-dir:
+    description: >-
+      Directory containing raw beacon payloads for fired canaries
+      (uploaded as the `canary-cage-fires` artifact when any fire).
+    value: ${{ steps.canary.outputs.fired-dir }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install canary-cage
+      shell: bash
+      env:
+        CANARY_CAGE_VERSION: ${{ inputs.canary-cage-version }}
+        CANARY_CAGE_ACTION_ROOT: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        if [ "${CANARY_CAGE_VERSION}" = "source" ]; then
+          echo "Installing canary-cage from ${CANARY_CAGE_ACTION_ROOT}"
+          python -m pip install --upgrade pip
+          python -m pip install "${CANARY_CAGE_ACTION_ROOT}"
+        else
+          echo "Installing canary-cage via pip spec: ${CANARY_CAGE_VERSION}"
+          python -m pip install --upgrade pip
+          python -m pip install "${CANARY_CAGE_VERSION}"
+        fi
+        python -c "import canary_cage, sys; print('canary-cage', canary_cage.__version__, 'ready on', sys.version.split()[0])"
+
+    - name: Run canary check
+      id: canary
+      shell: bash
+      env:
+        CANARY_CAGE_CONFIG: ${{ inputs.config-path }}
+        CANARY_CAGE_FAIL_ON_FIRE: ${{ inputs.fail-on-fire }}
+        CANARY_CAGE_SINCE: ${{ inputs.since }}
+        CANARY_CAGE_WORKDIR: ${{ inputs.working-directory }}
+        CANARY_CAGE_ACTION_ROOT: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python "${CANARY_CAGE_ACTION_ROOT}/scripts/action_runner.py"
+
+    - name: Upload fired beacons artifact
+      if: always() && steps.canary.outputs.fired-count != '0' && steps.canary.outputs.fired-count != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: canary-cage-fires
+        path: |
+          ${{ steps.canary.outputs.fired-dir }}
+          ${{ steps.canary.outputs.report-path }}
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: Comment on PR
+      if: >-
+        always()
+        && inputs.comment-on-pr == 'true'
+        && steps.canary.outputs.fired-count != '0'
+        && steps.canary.outputs.fired-count != ''
+        && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      env:
+        CANARY_CAGE_COMMENT_PATH: ${{ steps.canary.outputs.comment-path }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = process.env.CANARY_CAGE_COMMENT_PATH;
+          if (!path || !fs.existsSync(path)) {
+            core.warning(`canary-cage: no comment body at ${path}`);
+            return;
+          }
+          const body = fs.readFileSync(path, 'utf8');
+          const marker = '<!-- canary-cage:pr-comment -->';
+          const { owner, repo } = context.repo;
+          const issue_number = context.payload.pull_request.number;
+          const comments = await github.paginate(
+            github.rest.issues.listComments,
+            { owner, repo, issue_number, per_page: 100 },
+          );
+          const existing = comments.find(c => (c.body || '').includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner, repo, comment_id: existing.id, body,
+            });
+            core.info(`Updated canary-cage PR comment #${existing.id}`);
+          } else {
+            await github.rest.issues.createComment({
+              owner, repo, issue_number, body,
+            });
+            core.info('Created canary-cage PR comment');
+          }

@@ -1,0 +1,129 @@
+name: canary-cage-action-selftest
+
+# Exercises the composite action against a fixture that has an
+# intentionally-fired canary. Gives the action end-to-end coverage that
+# unit tests alone can't provide — installs the package, spawns the CLI,
+# writes to $GITHUB_STEP_SUMMARY, uploads the artifact, and asserts the
+# outputs match the fixture.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "action.yml"
+      - "scripts/action_runner.py"
+      - ".github/workflows/action-selftest.yml"
+      - "src/canary_cage/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "action.yml"
+      - "scripts/action_runner.py"
+      - ".github/workflows/action-selftest.yml"
+      - "src/canary_cage/**"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-repo:
+    name: action runs clean on a repo with no fires
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare fixture (no canaries planted → no fires)
+        run: |
+          mkdir -p fixtures/clean
+          cp -R $(pwd)/src fixtures/clean/src
+          cd fixtures/clean
+          cat > canary.toml <<'EOF'
+          [canary]
+          types = ["markdown", "todo"]
+          EOF
+
+      - name: Run action (fail-on-fire off → should always be green)
+        id: action
+        uses: ./
+        with:
+          working-directory: ${{ github.workspace }}/fixtures/clean
+          fail-on-fire: "false"
+
+      - name: Assert clean outputs
+        run: |
+          set -euo pipefail
+          echo "fired-count=${{ steps.action.outputs.fired-count }}"
+          echo "fired-ids=${{ steps.action.outputs.fired-ids }}"
+          test "${{ steps.action.outputs.fired-count }}" = "0"
+          test "${{ steps.action.outputs.fired-ids }}" = "[]"
+
+  fired-repo:
+    name: action detects a fired canary and fails when configured
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install canary-cage from source (for the fixture prep step)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Prepare fixture (plant then deliberately fire one canary)
+        run: |
+          set -euo pipefail
+          mkdir -p fixtures/fired/docs
+          cd fixtures/fired
+          cat > canary.toml <<'EOF'
+          [canary]
+          types = ["markdown"]
+          EOF
+          cat > README.md <<'EOF'
+          # Fixture repo
+
+          This directory exists to smoke-test the canary-cage action.
+          EOF
+          cat > docs/notes.md <<'EOF'
+          # Notes
+
+          Placeholder markdown that gives the planter something to inject into.
+          EOF
+          canary plant --root . --type markdown
+          # Simulate a fire by removing the planted file — the scanner treats
+          # a vanished target as a working-tree fire, which is exactly the
+          # signal we want to end-to-end assert.
+          rm -f docs/notes.md
+          echo "fixture ready — planted markdown canary and then deleted its host file"
+
+      - name: Run action (fail-on-fire on → expect exit 1)
+        id: action
+        uses: ./
+        continue-on-error: true
+        with:
+          working-directory: ${{ github.workspace }}/fixtures/fired
+          fail-on-fire: "true"
+
+      - name: Assert action reported the fire and failed
+        run: |
+          set -euo pipefail
+          echo "outcome=${{ steps.action.outcome }}"
+          echo "fired-count=${{ steps.action.outputs.fired-count }}"
+          echo "fired-ids=${{ steps.action.outputs.fired-ids }}"
+          test "${{ steps.action.outcome }}" = "failure"
+          test "${{ steps.action.outputs.fired-count }}" != "0"
+          test "${{ steps.action.outputs.fired-count }}" != ""
+
+      - name: Assert report + comment files exist
+        run: |
+          set -euo pipefail
+          test -f "${{ steps.action.outputs.report-path }}"
+          test -f "${{ steps.action.outputs.comment-path }}"
+          grep -q 'canary-cage' "${{ steps.action.outputs.comment-path }}"
+          grep -q 'canary fire' "${{ steps.action.outputs.comment-path }}"
