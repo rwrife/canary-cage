@@ -40,6 +40,20 @@ from .diff import (
     VERDICT_REMOVED,
     compute_diff,
 )
+from .explain import (
+    build_report,
+    list_fires,
+    load_fire,
+)
+from .explain import (
+    render_json as _explain_render_json,
+)
+from .explain import (
+    render_markdown as _explain_render_markdown,
+)
+from .explain import (
+    render_text as _explain_render_text,
+)
 from .fingerprint import (
     Fingerprinter,
     context_from_canary,
@@ -483,6 +497,74 @@ def check(
         table.add_row(rec.canary_id, rec.canary_type, rec.source, attributed, rec.detail)
     console.print(table)
     raise typer.Exit(code=1)
+
+
+_EXPLAIN_FORMAT_OPTION = typer.Option(
+    "markdown",
+    "--format",
+    "-f",
+    help="Report format: markdown (default), text, or json.",
+    case_sensitive=False,
+)
+
+
+@app.command()
+def explain(
+    fire_id: str | None = typer.Argument(
+        None,
+        help="Canary id to explain. Omit with --all to report every unresolved fire.",
+    ),
+    format: str = _EXPLAIN_FORMAT_OPTION,
+    all_fires: bool = typer.Option(
+        False,
+        "--all",
+        help="Report on every persisted fire under .canary-cage/fired/.",
+    ),
+    root: Path | None = _ROOT_OPTION,
+) -> None:
+    """Emit a human-readable incident report for a fire (issue #41).
+
+    Reads the fire from ``.canary-cage/fired/<fire_id>.json``, correlates
+    it against ``.canary-cage/state.json`` + ``git log``, scores its
+    severity, and renders a markdown / text / json report.
+    """
+
+    root = _resolve_root(root)
+    fmt = format.lower()
+    if fmt not in {"markdown", "text", "json"}:
+        console.print(f"[red]unknown --format {format!r}[/red]")
+        raise typer.Exit(code=2)
+
+    if all_fires:
+        fires = list_fires(root)
+        if not fires:
+            console.print("🐤 [green]no fires on record — nothing to explain.[/green]")
+            return
+    elif fire_id:
+        try:
+            fires = [load_fire(root, fire_id)]
+        except FileNotFoundError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+    else:
+        console.print("[red]give a fire id, or pass --all.[/red]")
+        raise typer.Exit(code=2)
+
+    renderers = {
+        "markdown": _explain_render_markdown,
+        "text": _explain_render_text,
+        "json": _explain_render_json,
+    }
+    render = renderers[fmt]
+
+    chunks: list[str] = []
+    for fire in fires:
+        report = build_report(root, fire)
+        chunks.append(render(report))
+
+    separator = "\n\n---\n\n" if fmt == "markdown" else "\n\n"
+    # print without Rich markup interpretation so diff/backticks survive.
+    console.print(separator.join(chunks), markup=False, highlight=False)
 
 
 _VERDICT_STYLE = {

@@ -307,6 +307,51 @@ canary precommit           # what the hook runs; exits 1 on violations
 
 Use `--force` to overwrite an existing pre-commit hook.
 
+## `canary explain` — human-readable jack report
+
+`canary check` tells you *that* a canary fired. `canary explain` tells
+you the story: which tripwire went off, what the bait was, what the
+repo actually looks like now, which commit is on the hook, how bad it
+is, and what to do next.
+
+```bash
+# Explain one fire by id (markdown output is the default — great for
+# pasting into a GitHub issue).
+canary explain md-1
+
+# Plain text for terminals / logs.
+canary explain md-1 --format text
+
+# Stable JSON for downstream tooling.
+canary explain md-1 --format json
+
+# Batch-report every fire currently on disk.
+canary explain --all
+```
+
+Each report contains:
+
+- **Canary metadata** — id, type, fired path, detection source.
+- **Bait vs. observed** — unified diff of the planted marker against the
+  file's current contents.
+- **Git correlation** — last commit that touched the fired path, its
+  author, subject, and full file list (best-effort; skipped when the
+  target isn't a git checkout).
+- **Severity** — `low` / `medium` / `high` / `critical` from a small
+  deterministic scorer over five signals: aggressive bait keywords,
+  code-execution attribution, external URLs, secret-looking tokens near
+  the trip site, and sensitive paths (`.env`, `secrets/`,
+  `.github/workflows`, …).
+- **Recommended actions** — checklist that turns the signals into concrete
+  next steps (rotate secret X, revert commit Y, re-run `canary check`, …).
+
+Fires are read from `.canary-cage/fired/<canary_id>.json` — the same
+artifacts the file beacon writes. Nothing leaves the machine.
+
+> Follow-ups tracked in the issue: `--attach-to <issue|pr>` to post the
+> report via `gh`, and an LLM-narrated variant. The current implementation
+> is deterministic and offline-safe.
+
 ## `canary diff` — what mutated since plant
 
 `canary check` answers *did something fire?* `canary diff` answers
